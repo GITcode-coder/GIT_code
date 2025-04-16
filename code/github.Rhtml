@@ -1,17 +1,12 @@
-<html>
-
-<head>
-<title>BCMC-code</title>
-</head>
+BCMC-code
 
 <body>
-<p>1. Assume the parameters of survival function and true value</p>
-<!--begin.rcode
-##1.1 set observation intervals 
+//1. Assume the parameters of survival function and true value//
+/// 1.1 set observation intervals
 k<-260
 interval<-1
 a<- seq(0,interval*k,interval)
-#2.set transition roads
+/// 1.2.set transition roads
 m<-4
 s<-c(1:m)
 #s<-1#PFS_PD
@@ -19,7 +14,7 @@ s<-c(1:m)
 #s<-3#PFS_D
 #s<-4#PD_D
 
-##3.Assume the baseline survival function parameters: lamda, alpha for the transition  
+/// 1.3.Assume the baseline survival function parameters: lamda, alpha for the transition  
 lamda_pfs<-0.2
 alpha_pfs<-1.2
 lamda_pd<-0.2
@@ -27,7 +22,7 @@ alpha_pd<-0.9
 s_pfs<-exp(-lamda_pfs*((a/10)^alpha_pfs))
 s_pd<-exp(-lamda_pd*((a/10)^alpha_pd))
 
-#4.Assume beta
+/// 1.4.Assume beta
 X<-1#The value of the covav riate, 1 represents the intervention
 beta<- matrix(0, nrow=m, ncol=k)
 #1. Constant
@@ -51,6 +46,8 @@ for(t in 1:k){
 }
 
 write.csv(beta,"~/Desktop/beta_true_var.csv")
+
+
 #3.U-shaped 
 beta<- matrix(0, nrow=m, ncol=k)
   for(t in 1:k){
@@ -63,7 +60,8 @@ beta<- matrix(0, nrow=m, ncol=k)
   beta[4,t]<-(-1)*40*si^(-1)*exp((-(x-130)^2)/(2*si^2))#
   }
  write.csv(beta,"~/Desktop/beta_true_norm.csv")
- 
+
+
 HR<- matrix(0, nrow=m, ncol=k)
 HR<-exp(beta)
 
@@ -72,17 +70,21 @@ lines(1:k, HR[2,][1:k], type="l", col="orange",lwd=2)
 lines(1:k, rep(1,k)[1:k], lty=2, col="red",lwd=2)
 legend("topright", legend=c("Other paths", "PD-PFS","HR=1"), col=c("green3", "orange", "red"), bty ="n",lty=1, ,lwd=2,cex=0.8)
 
-
 #Definite test group
 s_pfs_tr<-c(s_pfs[1],s_pfs[-1]^(exp(X*beta[1,])))
 s_pd_tr<-c(s_pd[1],s_pd[-1]^(exp(X*beta[2,])))
-end.rcode-->
+~~~~~~~~~
 
-<p>2. Generate the transition probability matrix<p>
-<!--begin.rcode
+
+
+
+
+// 2. Generate the transition probability matrix
 library(expm)
 library(pracma)
-#  generate transition probability matrixs of k periods
+/// 2.1 generate transition probability matrixs of k periods
+
+# control group
 p_list <- c(rep(NA, 3*3*k))
 dim(p_list)<-c(3,3,k)
 for (t in 1:k) {
@@ -156,19 +158,22 @@ for(i in 1:8){
   p_list_tr_ste[,,((i-1)*7+1):((i-1)*7+7)]<-abs(sqrtm(sqrtm(sqrtm(p_list_tr[,,i])$B)$B)$B)
 }
 p_list_tr_ste[,,57:K]<-p_list_tr[,,9:(k)]
-end.rcode-->
+~~~~~~~~~
 
-<p>3.Simulate the state transition<p>
-<!--begin.rcode
+
+
+// 3.Simulate the state transition 
+
 library(foreach)
 library(iterators)
 library(parallel)
 library(doParallel)
+
+/// 3.1. Repeat the cycle to generate sample data _ treatment group
 states<- 3  # number of states
 n<-100 # The number of samples n<-5000
 k<-260# the number of loops
 data_tran<-list()
-#1. Repeat the cycle to generate sample data _ treatment group
 n.cores <- detectCores()
 n.cores
 cl <- makeCluster(n.cores-1) 
@@ -193,7 +198,8 @@ data<- foreach(i = 1:n,
  data_tran[[kk]]<-data  
 }
 
-#2. Repeat the cycle to generate sample data _ control group
+
+/// 3.2. Repeat the cycle to generate sample data _ control group
 p_k<-p_list_ste
 data<-foreach(i = 1:n,
                .combine = rbind,
@@ -211,10 +217,13 @@ data<-foreach(i = 1:n,
 data_tran[[K+1]]<-data
 stopCluster(cl)
 write.csv(data_tran,"~/Desktop/data_tran_con.csv")#_con,_var,_norm
-end.rcode-->
+~~~~~~~~~
 
-<p>4. Extracted  survival time data<p>
-<!--begin.rcode
+
+
+
+// 4. Extracted  survival time data
+
 cl <- makeCluster(8-1) 
 registerDoParallel(cl)
 C<-list()
@@ -231,6 +240,7 @@ c_1<-foreach(i = 1:n,
   d<-data[i,]
   sit<-min(which(is.na(d)==FALSE))#if have NA
 for(t in sit:(K-1)){
+
   #survival time t
   Time[t+1]<-ifelse(d[t]==d[t+1],Time[t]+1,1)
   #state transition m
@@ -242,6 +252,8 @@ for(t in sit:(K-1)){
   }
   Time<-Time[sit:(K-1)]
   s<-s[sit:(K-1)]
+
+
  #chain data
 if (any(s!= 0)==TRUE) {#transfer has occurred
     if(last(Time)==1){# Transfer occurred at the last time point
@@ -252,6 +264,8 @@ if (any(s!= 0)==TRUE) {#transfer has occurred
     c<-rbind(c,ci)
   }
     }
+
+
     if(last(Time)>1){# No transfer occurred at the last point in time
      for(l in 1:(sum(s!= 0))){
    ci1<-c(ID=i,y=Time[which(s!= 0)][l],m=s[which(s!= 0)][l],"k"=which(s!= 0)[l],X=x,sigema=1)
@@ -259,6 +273,8 @@ if (any(s!= 0)==TRUE) {#transfer has occurred
     colnames(ci1)<-c("ID","y","m","k","X","sigema")
    c<-rbind(c,ci1)
      }
+
+
     if(last(d)==1|last(d)==2){## The last status is not dead, indicating that there is censoring data
    ci2<-c(ID=i,y=last(Time)-1,m=last(d),"k"=k-sit,X=x,sigema=0)
    ci3<-c(ID=i,y=last(Time)-1,m=last(d)+2,"k"=k-sit,X=x,sigema=0)
@@ -274,6 +290,8 @@ if (any(s!= 0)==TRUE) {#transfer has occurred
      }
     }
      }#If last(time) is greater than 1 and is not in state 3, then the survival time of the individual in state 1/2 is the censoring data and the survival time is last(time)-1
+
+
  if (any(s!= 0)==FALSE) {
   ci<-c(ID=i,y=last(Time)-1,m=last(d),"k"=k-sit,X=x,sigema=0)
   ci<-as.data.frame(t(ci))
@@ -291,10 +309,11 @@ C[[kk]]<-C_1
 stopCluster(cl)
 dim(C)
 write.csv(C,"~/Desktop/C_sample_con.csv")#_con,_var,_norm
-end.rcode-->
+~~~~~~~~~~
 
-<p>5. BCMC<p>
-<!--begin.rcode
+
+
+// 5. BCMC
 library(rjags)
 install.packages('coda')
 library(coda)
@@ -317,16 +336,16 @@ a[j+1] <- d[j] + (d[j] - d[j-1])/2
 
 
 j<-1
-# 1. Load  data
+/// 5.1  Load  data
 c<-6#c("ID","t","m","j","X","sigema")
 m<-4
-
-#2 Bayesian Estimation
 C_2<-rbind(C[[j]],C[[K+1]])
 l<-c(rep(NA,4))
 for(m in 1:4){
 l[m]<-length(which(C_2$m==m))
 }
+
+
 row<-max(l)
 Y<-c(rep(NA, row*c*m))
 dim(Y)<-c(row,c,m)
@@ -336,14 +355,12 @@ for(m in 1:4){
  Y[1:len1,,m]<-as.matrix(C_2[which(C_2$m==m),])
 }
 
-m<-4
 #"ID","t","m","j","X","sigema"
 Y2<-Y[,2,]
 Y6<-Y[,6,]
 interval<-1
 
-# Construct H[i,j,m] and N[i,j,m]
-
+///5.2  Construct H[i,m] and N[i,m]
 h<-matrix(0,row,m)
 nn<-matrix(0,row,m)
 for(m in 1:4){
@@ -355,6 +372,7 @@ nn[i,m]<-h0*aa0*delta[i,m]
 }
 }
 
+/// 5.3 Bayesian Estimation
 Y5<-Y[,5,]
 lam<-matrix(0,m,K)
 beta<-matrix(0,m,K)
@@ -393,7 +411,10 @@ sample <- coda.samples(model,variable.names=params,n.iter=20000, progress.bar="n
 sum<-summary(sample)
 beta_post0_con<-cbind(mean=sum[["statistics"]][,1],lwr=sum[["quantiles"]][,1],upr=sum[["quantiles"]][,5])
 
-#～～～～
+～～～～
+#j:2~K
+
+
 m<-4
 f<-rep(0,m)
 e<-rep(0,m)
@@ -407,7 +428,7 @@ beta_post1_con<-foreach(j = 2:K,
                .combine = rbind,
               .packages = c("R2jags","coda","lattice","MCMCvis"),
                .errorhandling = "pass") %dopar% {
-#1.data list
+# 1.data list
 lam1<-lam[,j]
 beta1<-beta[,j]
 
@@ -431,6 +452,7 @@ Y2<-Y[,2,]
 Y6<-Y[,6,]
 interval<-1
 
+# Construct H[i,m] and N[i,m]
 h<-matrix(0,max(l),m)
 nn<-matrix(0,max(l),m)
 for(m in 1:4){
@@ -442,6 +464,8 @@ nn[i,m]<-h0*aa0*delta[i,m]
 }
 }
 a1<-a[j+1]-a[j]
+
+
 #2.constrcut model
 model_string <- textConnection("
   model{
@@ -468,27 +492,30 @@ for(m in 1:4){
 beta1[m] ~ dnorm(0,0.000001)
 } 
 }")
+
 data_list <- list(l=l,Y1=Y1,h=h,nn=nn)
 m<-4
 inits <- list(beta1=rnorm(m),lam1=rep(0.1,m))
 model <- jags.model(model_string,data = data_list, inits=inits, n.chains=2,n.adapt=1000)
+
 #(4)generate 20000 post-burn-in samples
 params <- c("beta1")#,"lam","S.pos","S.neg","S.diff") 
 #params <- c("HR")
-sample <- coda.samples(model,variable.names=params,n.iter=20000, progress.bar="none")#很快2min
+sample <- coda.samples(model,variable.names=params,n.iter=20000, progress.bar="none")
+
 # (5) Summarize the output
 sum<-summary(sample)
-outcome<-as.data.frame(cbind(mean=sum[["statistics"]][,1],lwr=sum[["quantiles"]][,1],upr=sum[["quantiles"]][,5]))#差别不大
+outcome<-as.data.frame(cbind(mean=sum[["statistics"]][,1],lwr=sum[["quantiles"]][,1],upr=sum[["quantiles"]][,5]))
 return(outcome3)
 }
 stopCluster(cl)
 
 beta_post_1<-as.data.frame(rbind(beta_post0_con,beta_post1_con))
 write.csv(beta_post_1,"~/Desktop/beta_bcmc_con.csv")#_con,_var,_norm
-end.rcode-->
+~~~~~~~~
 
-<p>6. fre-cox<p>
-<!--begin.rcode
+
+// 6. fre-cox
 library(readr)
 C<- read_csv("~/Desktop/C_sample_con.csv")[,-1]
 C0<-c(rep(0,7))
@@ -499,6 +526,7 @@ for(kk in 1:(K+1)){
   C0<-rbind(C0,C1)
 }
 C0<-C0[-1,]
+
 m<-4 
 HR_Fre<-matrix(0,m,3)
 library(survival)
@@ -512,10 +540,10 @@ for(m in c(1:4)){
 
 colnames(HR_Fre)<-c("HR","low","upr")
 write.csv(HR_Fre,"~/Desktop/HR_fre_con.csv")#_con,_var,_norm
-end.rcode-->
+~~~~~~~~
 
-<p>7. time-varying cox (contimuous function)<p>
-<!--begin.rcode
+
+// 7. time-varying cox (contimuous function)
 install.packages(c("survival", "survminer"))
 library("survival")
 library("survminer")
@@ -535,11 +563,11 @@ for(m in c(1:4)){
 
 HR_TV<-cbind(HR_TV,HR_TV_low,HR_TV_upr)
 write.csv(HR_TV,"~/Desktop/HR_TV_con.csv")#_con,_var,_norm
-end.rcode-->
+~~~~~~~~
 
-<p>8.regularize and fit Estimated value<p>
-<p>8.1 Filter,Normalize,Average  <p>
-<!--begin.rcode
+
+// 8.regularize and fit Estimated value<p>
+/// 8.1 Filter,Normalize,Average 
 beta_post_1<- read_csv("~/Desktop/beta_bcmc_con.csv")
 HR_cox <- read_csv("~/Desktop/HR_fre_con.csv")[,-1]
 HR_TV <- read_csv("~/Desktop/HR_TV_con.csv")[,-1]
@@ -548,6 +576,7 @@ beta_post_11<-c(beta_post_1$mean,beta_post_1$upr)
 x<-c(0:(length(int)*2))
 beta_post<-as.data.frame(x)
 be<-c(0)
+
 for(m in 1:4){
   for(t in 1:(length(int)*2)){
   row<-m+4*(t-1)
@@ -572,6 +601,7 @@ ci[which(ci>3)]<-3
 beta_post[fan[,2],m+5]<-ci
 }
 summary(beta_post[fan[,2],])
+
 #Removal of extremes
 for(m in 1:4){
   up<-quantile(beta_post[fan[,1],m+1], 0.975)
@@ -587,7 +617,8 @@ redu<-abs(log(stan1)/mean(beta_post$y4f[fan[,1]]))
 for(m in 1:4){
   beta_post[fan[,1],m+5]<-beta_post[fan[,1],m+5]*redu
 }
-#for beta
+
+#average
 for(l in 1:2){  
 for(m in 1:4){
 for(t in fan[,l]){
@@ -595,6 +626,7 @@ for(t in fan[,l]){
 }
 }
 }
+
 plot(int, beta_post$V10[fan[,1]], type="l", col="steelblue2" , xlab="Weeks",ylab="beta",ylim=c(-4,4),main="Time-varying beta (After filtering)",bty="l",lwd=1)#range(beta_post$V10,na.rm=TRUE)
 lines(int, beta_post$V11[fan[,1]], type="l", col="purple",lwd=1)
 lines(int, beta_post$V12[fan[,1]], type="l", col="palegreen3",lwd=1)
@@ -604,10 +636,10 @@ legend("topright", legend=c("PFS-PD", "PD-PFS", "PFS-D", "PD-D","beta=0"), col=c
 
 beta_post<-beta_post[,10:13]
 write.csv(beta_post,"~/Desktop/beta_stan_con.csv")
-end.rcode-->
+~~~~~~~~
 
-<p>8.2 weibull fit and 95%CI<p>
-<!--begin.rcode
+
+// 8.2 weibull fit and 95%CI
 #weibull fit
 library(readr)
 beta_post <-read_csv("~/Desktop/beta_stan_con.csv")[,-1]
@@ -615,6 +647,8 @@ staus<-c("var")#con,var,norm
 bcmc_wei<-list()
 length(int)
 fan<-cbind(1:length(int),(1:length(int))+length(int))
+
+
 library (MASS)
 for(m in 1:4){
 fit_num<-c((1:8)*7,57:length(int))
@@ -684,6 +718,8 @@ shape<-fit[["estimate"]][1]
 scale<-fit[["estimate"]][2]
 t<-c(1:k)
 weibull<-dweibull(t, shape = shape, scale = scale)
+
+
 #plot(weibull)
 #lines(weibull)
 weibull<-weibull*(redu)+base
@@ -719,10 +755,10 @@ x<- data.frame(x = t)
 dat_all[[m]]<-cbind(x,bcmc_wei[[m]],y_cox,y_tv,y_true)
 }
 dat_weibull<-dat_all
-end.rcode-->
+~~~~~~~~
 
-<p>8.3 linear fit and 95%ci<p>
-<!--begin.rcode
+
+// 8.3 linear fit and 95%ci
 #linear fit
 library(readr)
 beta_post <- read_csv("~/Desktop/beta_stan_con.csv")[,-1]
@@ -778,6 +814,8 @@ base_1<-max(bcmc_lin[[m]][,1])
 stan_1<-(bcmc_lin[[m]][,1]-base_1)/((y_upr)+(y_lwr)/2-base_1)
 y_upr_1<-(y_upr-base_1)*stan_1+base_1
 y_lwr_1<-bcmc_lin[[m]][,1]*2-y_upr_1
+
+
 #m<-1,0.2
 t<-1:(k)
 plot(t, bcmc_lin[[m]][,1], type="l", col="steelblue2", ylim=c(0,4), xlab="Week", ylab="beta", main="Time-varying beta")
@@ -796,10 +834,10 @@ x<- data.frame(x = t)
 dat_all[[m]]<-cbind(x,bcmc_lin[[m]],y_cox,y_tv,y_true)
 }     
 dat_linear<-dat_all
-end.rcode-->
+~~~~~~~~
 
-<p>8.4 select better fitting model<p>
-<!--begin.rcode
+
+// 8.4 select better fitting model<p>
 for(m in 1:4){
 dat_lin<-dat_linear[[m]]
 dat_wei<-dat_weibull[[m]]
@@ -811,9 +849,10 @@ print(mean(mse_2[,1]))
 dat_all[[m]][,2:4]<-ifelse(mse_1<mse_2,dat_lin[,2:4],dat_wei[,2:4])
 }
 write.csv(dat_all,"~/Desktop/HR_ALL_con.csv")
-end.rcode-->
+~~~~~~~~
 
-<p>9. Table_1<p>
+
+// 9. Table_1<p>
 <!--begin.rcode
 library(readr)
 dat_con<- read_csv("~/Desktop/HR_ALL_con.csv")[,-1]
@@ -851,6 +890,7 @@ for(m in 1:4){
   p<-paste0("(",round(t.test((dat$true-dat$bcmc)^2)$conf.int[1],2),",",round(t.test((dat$true-dat$bcmc)^2)$conf.int[2],2),")")
  mse_5<-c(mse_5,n,o,p)
   }
+
 rmse<-sqrt(mse)
 out_con<-cbind(mae,mae_5,mse,mse_5,rmse,mape)[-1,]
 out_var<-cbind(mae,mae_5,mse,mse_5,rmse,mape)[-1,]
@@ -859,10 +899,10 @@ out_norm<-cbind(mae,mae_5,mse,mse_5,rmse,mape)[-1,]
 write.csv(out_con,"~/Desktop/table1_con_z.csv")
 write.csv(out_var,"~/Desktop/table1_var_z.csv")
 write.csv(out_norm,"~/Desktop/table1_norm_z.csv")
-end.rcode-->
+~~~~~~~~
 
-<p>10. Table_2<p>
-<!--begin.rcode
+
+// 10. Table_2<p>
 t<-c(1:(k))
 dat_norm<-dat_draw
 a<-t[which.min(dat_norm$bcmc...3)]
@@ -903,10 +943,10 @@ for(c in 1:5){
 colnames(OS_NORM_2)
 OS_NORM_2<-rbind(top,OS_NORM_2[,-1])
 write.csv(OS_NORM_2,"~/Desktop/table2_norm_z.csv")
-end.rcode-->
+~~~~~~~~
 
-<p>11. constant freeplot<p>
-<!--begin.rcode
+
+// 11. constant freeplot<p>
 library(readr)
 dat_con<- read_csv("~/Desktop/HR_ALL_con.csv")[,-1]
 
@@ -924,10 +964,10 @@ for(m in 1:4){
 esti$ES_95<-paste0(round(esti[,1],2)," (",round(esti[,2],2),", ",round(esti[,3],2),")")
 
 write.csv(esti,"~/Desktop/table2_con_z.csv")
-end.rcode-->
+~~~~~~~~
 
-<p>12. TVC-Cox(B splines)<p>
-<!--begin.rcode
+
+// 12. TVC-Cox(B splines)<p>
 dat_all<-list()
 library(readr)
 dat_draw <- read_csv("~/Desktop/HR_ALL_norm.csv")[,-1]
@@ -956,10 +996,10 @@ rcs<-data.frame(TVC=p1$hazard_ratio,TVC_lwr=p1$lowerbound,TVC_upr=p1$upperbound)
 dat_rcs[[m]]<-cbind(dat_all[[m]],rcs)
 }
 write.csv(dat_rcs,"~/Desktop/HR_TVC_ALL_norm.csv")
-end.rcode-->
+~~~~~~~~
 
-<p>13. the time chain data of overall survival pfs/pd-d in realworld analysis<p>
-<!--begin.rcode
+
+// 13. the time chain data of overall survival pfs/pd-d in realworld analysis<p>
 cl <- makeCluster(8-1) 
 registerDoParallel(cl)
 C_11<-list()
@@ -987,6 +1027,8 @@ for(t in sit:(K-1)){
   }
   Time<-Time[sit:(K-1)]
   s<-s[sit:(K-1)]
+
+
  #chain data
 if (any(s!= 0)==TRUE) {#transfer has occurred
     if(last(Time)==1){# Transfer occurred at the last time point
@@ -1004,6 +1046,8 @@ if (any(s!= 0)==TRUE) {#transfer has occurred
     colnames(ci1)<-c("ID","y","m","k","X","sigema")
    c<-rbind(c,ci1)
      }
+
+
     if(last(d)==1|last(d)==2){## The last status is not dead, indicating that there is censoring data
    ci2<-c(ID=i,y=last(Time)-1,m=last(d),"k"=k-sit,X=x,sigema=0)
    ci3<-c(ID=i,y=last(Time)-1,m=last(d)+2,"k"=k-sit,X=x,sigema=0)
@@ -1019,7 +1063,9 @@ if (any(s!= 0)==TRUE) {#transfer has occurred
      }
     }
      }#If last(time) is greater than 1 and is not in state 3, then the survival time of the individual in state 1/2 is the censoring data and the survival time is last(time)-1
- if (any(s!= 0)==FALSE) {
+ 
+
+if (any(s!= 0)==FALSE) {
   ci<-c(ID=i,y=last(Time)-1,m=last(d),"k"=k-sit,X=x,sigema=0)
   ci<-as.data.frame(t(ci))
     colnames(ci)<-c("ID","y","m","k","X","sigema")
@@ -1031,11 +1077,11 @@ if (any(s!= 0)==TRUE) {#transfer has occurred
 C_1<-as.data.frame(c_1[which(!c_1$ID==0),])
 C_1$y<-ifelse(C_1$y<=56,(C_1$y)/7,(C_1$y)-56+8)
 summary(C_1$y)
+
 # m=1 means pfs-pd
 C_11[[kk]]<-C_1[which(C_1$m==1),]
 }
 stopCluster(cl)
-#include the chain data of 4 transition paths
 
 
 #m=2 means overall survival of pfs/pd-d，including pfs-pd-d，pfs-d，pd-d，pd-pfs-d
@@ -1073,6 +1119,7 @@ ci<-c(i,min(which(d==3))-sit,2,min(which(d==3))-sit,as.numeric(x[min(which(d==3)
   }
   return(ci)
                }
+
 C_2<-as.data.frame(c_2[which(!c_2$ID==0),])
 C_2$y<-ifelse(C_2$y<=56,(C_2$y)/7,(C_2$y)-56+8)
 summary(C_2$y)
@@ -1080,13 +1127,12 @@ C_22[[kk]]<-C_2
 }
 stopCluster(cl)
 
+
 C<-list()
 for(kk in 1:(K+1)){
   C[[kk]]<-rbind(C_11[[kk]],C_22[[kk]])
 }
 write.csv(C,"~/Desktop/realworld/C_sample_m2.csv")
 #include the chain data of 2 transition paths:pfs-pd,pfs/pd-d(overall survival)
-end.rcode-->
 
 </body>
-</html>
