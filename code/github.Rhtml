@@ -110,16 +110,15 @@ legend("topright", legend=c("PFS-PD", "PD-PFS","PFS-D","PD-D"), col=c("steelblue
 # simulated the period of 1-8 weeks, 56 points were inserted
 e<-7
 int<-c((1:56)/7,9:k)
-length(int)
+K<-length(int)
 
 library(pracma)
-p_list_ste<- c(rep(0, 3*3*length(int)))
-dim(p_list_ste)<-c(3,3,length(int))
+p_list_ste<- c(rep(0, 3*3*K))
+dim(p_list_ste)<-c(3,3,K)
 for(i in 1:8){
   p_list_ste[,,((i-1)*7+1):((i-1)*7+7)]<-abs(sqrtm(sqrtm(sqrtm(p_list[,,1])$B)$B)$B)
 }
-p_list_ste[,,57:length(int)]<-p_list[,,9:k]
-
+p_list_ste[,,57:K]<-p_list[,,9:k]
 
 #treatment group
 X<-1
@@ -149,13 +148,14 @@ legend("topright", legend=c("PFS-PD", "PD-PFS","PFS-D","PD-D"), col=c("steelblue
 
 # simulated the period of 1-8 weeks, 56 points were inserted
 e<-7
-int<-c((1:56)/7,9:(k))
-p_list_tr_ste<- c(rep(0, 3*3*length(int)))
-dim(p_list_tr_ste)<-c(3,3,length(int))
+int<-c((1:56)/8,9:(k))
+
+p_list_tr_ste<- c(rep(0, 3*3*K))
+dim(p_list_tr_ste)<-c(3,3,K)
 for(i in 1:8){
   p_list_tr_ste[,,((i-1)*7+1):((i-1)*7+7)]<-abs(sqrtm(sqrtm(sqrtm(p_list_tr[,,i])$B)$B)$B)
 }
-p_list_tr_ste[,,57:length(int)]<-p_list_tr[,,9:(k)]
+p_list_tr_ste[,,57:K]<-p_list_tr[,,9:(k)]
 end.rcode-->
 
 <p>3.Simulate the state transition<p>
@@ -165,35 +165,40 @@ library(iterators)
 library(parallel)
 library(doParallel)
 states<- 3  # number of states
-n<-5000 # The number of samples 
+n<-100 # The number of samples n<-5000
 k<-260# the number of loops
-int<-c((1:56)/7,9:(k))
+data_tran<-list()
+#1. Repeat the cycle to generate sample data _ treatment group
 n.cores <- detectCores()
 n.cores
 cl <- makeCluster(n.cores-1) 
 registerDoParallel(cl)
-#1. Repeat the cycle to generate sample data _ control group
-data<-foreach(i = 1:n,
+for(kk in 1:K){
+      p_k<- p_list_ste
+     p_k[,,(kk:K)]<- p_list_tr_ste[,,(kk:K)]
+data<- as.data.frame(NA, nrow = n, ncol = K+1)
+data<- foreach(i = 1:n,
                .combine = rbind,
                .errorhandling = "pass") %dopar% {
-  current_state <- rep(1:2,each=n/2)[1]
+  current_state <- ifelse(i<=(n/2),1,2)
   da<-c(current_state)
   # Store sample sequences
-  for(t in 1:length(int)){
-    next_state <- sample(1:states, 1, prob = p_list_ste[current_state,,t])
+  for(t in 1:K){
+    next_state <- sample(1:states, 1, prob = p_k[current_state,,t])
   da<- c(da,next_state)
   current_state<-next_state
   }
   return(da)
                }
-data_1  <- as.data.frame(data)
-colnames(data_1)<-c(1:(length(int)+1))
+ data_tran[[kk]]<-data  
+}
 
-#1. Repeat the cycle to generate sample data _ treatment group
+#2. Repeat the cycle to generate sample data _ control group
+p_k<-p_list_ste
 data<-foreach(i = 1:n,
                .combine = rbind,
                .errorhandling = "pass") %dopar% {
-  current_state <- rep(1:2,each=n/2)[1]
+  current_state <- ifelse(i<=(n/2),1,2)
   da<-c(current_state)
   # Store sample sequences
   for(t in 1:length(int)){
@@ -203,109 +208,96 @@ data<-foreach(i = 1:n,
   }
   return(da)
                }
+data_tran[[K+1]]<-data
 stopCluster(cl)
-data_2  <- as.data.frame(data)
-colnames(data_2)<-c(1:(length(int)+1))
-
-data_tran<- c(rep(0, n*(length(int)+1)*2))
-dim(data_tran)<-c(n,(length(int)+1),2)
-data_tran[,,1]<-as.matrix(data_1)
-data_tran[,,2]<-as.matrix(data_2)
 write.csv(data_tran,"~/Desktop/data_tran_con.csv")#_con,_var,_norm
 end.rcode-->
 
 <p>4. Extracted  survival time data<p>
 <!--begin.rcode
-Time<-c(rep(1, (length(int)+1)))
-s<-c(rep(0, (length(int)+1)))
-data<-data_tran
 cl <- makeCluster(8-1) 
 registerDoParallel(cl)
+C<-list()
+for(kk in 1:(K+1)){#(K+1)
+  x<-ifelse(kk<=K,1,0)
+data<-data_tran[[kk]]
 c_1<-foreach(i = 1:n,
                .combine = rbind,
+             .packages = c("dplyr"),
                .errorhandling = "pass") %dopar% {
                  c<-c(rep(0, 6))
-for(dat in 1:2){
-for(t in 1:length(int)){
+                 Time<-c(rep(1, K))
+                 s<-c(rep(0, K))
+  d<-data[i,]
+  sit<-min(which(is.na(d)==FALSE))#if have NA
+for(t in sit:(K-1)){
   #survival time t
-  Time[t+1]<-ifelse(data[i,t,dat]==data[i,t+1,dat],Time[t]+1,1)
+  Time[t+1]<-ifelse(d[t]==d[t+1],Time[t]+1,1)
   #state transition m
-  if ((data[i,t,dat]==1)&(data[i,t+1,dat]==2)) {s[t]<-1}
-  else if ((data[i,t,dat]==2)&(data[i,t+1,dat]==1)) {s[t]<-2}
-  else if ((data[i,t,dat]==1)&(data[i,t+1,dat]==3)) {s[t]<-3} 
-  else if ((data[i,t,dat]==2)&(data[i,t+1,dat]==3)) {s[t]<-4}
+  if ((d[t]==1)&(d[t+1]==2)) {s[t]<-1}
+  else if ((d[t]==2)&(d[t+1]==1)) {s[t]<-2}
+  else if ((d[t]==1)&(d[t+1]==3)) {s[t]<-3} 
+  else if ((d[t]==2)&(d[t+1]==3)) {s[t]<-4}
   else s[t]<-0
   }
+  Time<-Time[sit:(K-1)]
+  s<-s[sit:(K-1)]
  #chain data
-if (any(s != 0)==TRUE) {
-    if(Time[length(int)+1]==1){
-  for(l in 1:(sum(s!= 0))){
-    ci<-c(ID=i,y=Time[which(s!= 0)][l],m=s[which(s!= 0)][l],"k"=which(s!= 0)[l],X=dat-1,sigema=1)
-    c<-as.data.frame(rbind(c,ci))
+if (any(s!= 0)==TRUE) {#transfer has occurred
+    if(last(Time)==1){# Transfer occurred at the last time point
+  for(l in 1:(sum(s!= 0))){#sum(s! = 0) denote the number of transitions occurred
+    ci<-c(ID=i,y=Time[which(s!= 0)][l],m=s[which(s!= 0)][l],"k"=which(s!= 0)[l],X=x,sigema=1)
+    ci<-as.data.frame(t(ci))
+    colnames(ci)<-c("ID","y","m","k","X","sigema")
+    c<-rbind(c,ci)
   }
     }
-    if(Time[length(int)+1]>1){
+    if(last(Time)>1){# No transfer occurred at the last point in time
      for(l in 1:(sum(s!= 0))){
-   ci1<-c(ID=i,y=Time[which(s!= 0)][l],m=s[which(s!= 0)][l],"k"=which(s!= 0)[l],X=dat-1,sigema=1)
-   c<-as.data.frame(rbind(c,ci1))
+   ci1<-c(ID=i,y=Time[which(s!= 0)][l],m=s[which(s!= 0)][l],"k"=which(s!= 0)[l],X=x,sigema=1)
+   ci1<-as.data.frame(t(ci1))
+    colnames(ci1)<-c("ID","y","m","k","X","sigema")
+   c<-rbind(c,ci1)
      }
-    if(data[i,length(int)+1,dat]==1|data[i,length(int)+1,dat]==2){
-   ci2<-c(ID=i,y=Time[length(int)+1]-1,m=data[i,length(int)+1,dat],"k"=length(int),X=dat-1,sigema=0)
-    c<-as.data.frame(rbind(c,ci2))
+    if(last(d)==1|last(d)==2){## The last status is not dead, indicating that there is censoring data
+   ci2<-c(ID=i,y=last(Time)-1,m=last(d),"k"=k-sit,X=x,sigema=0)
+   ci3<-c(ID=i,y=last(Time)-1,m=last(d)+2,"k"=k-sit,X=x,sigema=0)
+   #m=1 in the last time correspond the censoring data of m=1/m=3;m=2 in the last time correspond the censoring data of m=2/m=4 
+   ci2<-as.data.frame(t(ci2))
+   ci3<-as.data.frame(t(ci3))
+    colnames(ci2)<-c("ID","y","m","k","X","sigema")
+    colnames(ci3)<-c("ID","y","m","k","X","sigema")
+    c<-rbind(c,ci2,ci3)
   }
-      if(data[i,length(int)+1,dat]==3){
+      if(last(d)==3){
   c<-c
      }
     }
-     }#If t[k+1] is greater than 1 and is not in state 3, then the survival time of the individual in state 1/2 is the censoring data and the survival time is t[k+1]-1
+     }#If last(time) is greater than 1 and is not in state 3, then the survival time of the individual in state 1/2 is the censoring data and the survival time is last(time)-1
  if (any(s!= 0)==FALSE) {
-  ci<-c(ID=i,y=length(int),m=data[i,length(int)+1,dat],"k"=length(int),X=dat-1,sigema=0)
+  ci<-c(ID=i,y=last(Time)-1,m=last(d),"k"=k-sit,X=x,sigema=0)
+  ci<-as.data.frame(t(ci))
+    colnames(ci)<-c("ID","y","m","k","X","sigema")
     c<-as.data.frame(rbind(c,ci))
    }
-}
+
                  return(c)
+               }
+C_1<-as.data.frame(c_1[which(!c_1$ID==0),])
+C_1$y<-ifelse(C_1$y<=56,(C_1$y)/7,(C_1$y)-56+8)
+summary(C_1$y)
+C[[kk]]<-C_1
 }
 stopCluster(cl)
-C<-as.data.frame(c_1[which(!c_1$ID==0),])
-d<-sort(unique(C$y))
+dim(C)
 write.csv(C,"~/Desktop/C_sample_con.csv")#_con,_var,_norm
 end.rcode-->
 
 <p>5. BCMC<p>
-<p>5.1 Prior data<p>
 <!--begin.rcode
 library(rjags)
 install.packages('coda')
 library(coda)
-# Load  data
-c<-6#c("ID","t","m","j","X","sigema")
-l<-0
-m<-4
-for(m in 1:4){
-len1<-length(which(C$m==m))
-l<-c(l,len1)
-}
-l<-l[-1]
-sum(l)
-row<-max(l)
-Y<-c(rep(NA, row*c*m))
-dim(Y)<-c(row,c,m)
-colnames(Y) <-c("ID","t","m","j","X","sigema")
-for(m in 1:4){
-  len1<-length(which(C$m==m))
- Y[1:len1,,m]<-as.matrix(C[which(C$m==m),])
-}
-# Dimension of vector d is k
-a <- 0
-d<-c(1:length(int))
-for(j in 2:length(d)){
-a[j] <- (d[j-1] + d[j])/2
-}
-a[j+1] <- d[j] + (d[j] - d[j-1])/2
-end.rcode-->
-
-<p>5.2 Bayesian Estimation<p>
-<!--begin.rcode
 library(foreach)
 library(iterators)
 library(parallel)
@@ -314,15 +306,46 @@ library(R2jags)
 library(coda)
 library(lattice)
 library(MCMCvis)
-#j=1
-m<-4
+# Dimension of vector d is k
+a <- 0
+d<-int
+K<-length(int)
+for(j in 2:K){
+a[j] <- (d[j-1] + d[j])/2
+}
+a[j+1] <- d[j] + (d[j] - d[j-1])/2
+
+
 j<-1
+# 1. Load  data
+c<-6#c("ID","t","m","j","X","sigema")
+m<-4
+
+#2 Bayesian Estimation
+C_2<-rbind(C[[j]],C[[K+1]])
+l<-c(rep(NA,4))
+for(m in 1:4){
+l[m]<-length(which(C_2$m==m))
+}
+row<-max(l)
+Y<-c(rep(NA, row*c*m))
+dim(Y)<-c(row,c,m)
+colnames(Y) <-c("ID","t","m","j","X","sigema")
+for(m in 1:4){
+  len1<-l[m]
+ Y[1:len1,,m]<-as.matrix(C_2[which(C_2$m==m),])
+}
+
+m<-4
+#"ID","t","m","j","X","sigema"
 Y2<-Y[,2,]
-delta<-Y[,6,]
+Y6<-Y[,6,]
 interval<-1
 
-h<-matrix(0,max(l),m)
-nn<-matrix(0,max(l),m)
+# Construct H[i,j,m] and N[i,j,m]
+
+h<-matrix(0,row,m)
+nn<-matrix(0,row,m)
 for(m in 1:4){
 for(i in 1:l[m]){
 h0<- ifelse(Y2[i,m]*interval < a[j],0,1)
@@ -332,9 +355,9 @@ nn[i,m]<-h0*aa0*delta[i,m]
 }
 }
 
-Y1<-Y[,5,]
-lam<-matrix(0,m,length(int))
-beta<-matrix(0,m,length(int))
+Y5<-Y[,5,]
+lam<-matrix(0,m,K)
+beta<-matrix(0,m,K)
 lam1<-lam[,j]
 beta1<-beta[,j]
 
@@ -343,7 +366,7 @@ model_string <- textConnection("
 # Likelihood Construction
 for(m in 1:4){
 for(i in 1:l[m]){
-nn[i,m]~ dpois(exp(beta1[m]*(Y1[i,m]))*h[i,m]*lam1[m])
+nn[i,m]~ dpois(exp(beta1[m]*(Y5[i,m]))*h[i,m]*lam1[m])
 }}
 
   # Prior for lambdas
@@ -359,7 +382,7 @@ beta1[m] ~ dnorm(0,0.000001)
 }# 
 }
 ")
-data_list <- list(l=l,Y1=Y1,h=h,nn=nn)
+data_list <- list(l=l,Y5=Y5,h=h,nn=nn)
 m<-4
 inits <- list(beta1=rnorm(m),lam1=rep(0.1,m))
 model <- jags.model(model_string,data = data_list, inits=inits, n.chains=2,n.adapt=1000)
@@ -370,24 +393,43 @@ sample <- coda.samples(model,variable.names=params,n.iter=20000, progress.bar="n
 sum<-summary(sample)
 beta_post0_con<-cbind(mean=sum[["statistics"]][,1],lwr=sum[["quantiles"]][,1],upr=sum[["quantiles"]][,5])
 
-#~~~~~
+#～～～～
 m<-4
 f<-rep(0,m)
 e<-rep(0,m)
-lam<-matrix(0,m,length(int))
-beta<-matrix(0,m,length(int))
+lam<-matrix(0,m,K)
+beta<-matrix(0,m,K)
+
 cl <- makeCluster(n.cores-1) 
 registerDoParallel(cl)
-Y2<-Y[,2,]
-delta<-Y[,6,]
-Y1<-Y[,5,]
-beta_post1_con<-foreach(j = 2:length(int),
+
+beta_post1_con<-foreach(j = 2:K,
                .combine = rbind,
               .packages = c("R2jags","coda","lattice","MCMCvis"),
                .errorhandling = "pass") %dopar% {
 #1.data list
 lam1<-lam[,j]
 beta1<-beta[,j]
+
+C_2<-rbind(C[[j]],C[[K+1]])
+l<-c(rep(NA,4))
+for(m in 1:4){
+l[m]<-length(which(C_2$m==m))
+}
+row<-max(l)
+Y<-c(rep(NA, row*c*m))
+dim(Y)<-c(row,c,m)
+colnames(Y) <-c("ID","t","m","j","X","sigema")
+for(m in 1:4){
+  len1<-l[m]
+ Y[1:len1,,m]<-as.matrix(C_2[which(C_2$m==m),])
+}
+
+m<-4
+#"ID","t","m","j","X","sigema"
+Y2<-Y[,2,]
+Y6<-Y[,6,]
+interval<-1
 
 h<-matrix(0,max(l),m)
 nn<-matrix(0,max(l),m)
@@ -426,7 +468,7 @@ for(m in 1:4){
 beta1[m] ~ dnorm(0,0.000001)
 } 
 }")
-data_list <- list(l=l,Y1=Y1,h=h,nn=nn,a1=a1)
+data_list <- list(l=l,Y1=Y1,h=h,nn=nn)
 m<-4
 inits <- list(beta1=rnorm(m),lam1=rep(0.1,m))
 model <- jags.model(model_string,data = data_list, inits=inits, n.chains=2,n.adapt=1000)
@@ -447,11 +489,21 @@ end.rcode-->
 
 <p>6. fre-cox<p>
 <!--begin.rcode
+library(readr)
+C<- read_csv("~/Desktop/C_sample_con.csv")[,-1]
+C0<-c(rep(0,7))
+for(kk in 1:(K+1)){
+  kk<-1
+  J<-c(rep(kk,dim(C[[kk]])[1]))
+  C1<-cbind(C[[kk]],J)
+  C0<-rbind(C0,C1)
+}
+C0<-C0[-1,]
 m<-4 
 HR_Fre<-matrix(0,m,3)
 library(survival)
 for(m in c(1:4)){
-  data0<-C[which(C$m==m),]
+  data0<-C0[which(C0$m==m),]
   data<-list(y=data0$y,group=data0$X,delta=data0$sigema)
   res.cox <- coxph(Surv(y, delta) ~ group, data = data)
   sum<-summary(res.cox)
@@ -467,12 +519,13 @@ end.rcode-->
 install.packages(c("survival", "survminer"))
 library("survival")
 library("survminer")
-HR_TV<-matrix(0,length(int),m)
-HR_TV_low<-matrix(0,length(int),m)
-HR_TV_upr<-matrix(0,length(int),m)
+HR_TV<-matrix(0,K,m)
+HR_TV_low<-matrix(0,K,m)
+HR_TV_upr<-matrix(0,K,m)
 
 for(m in c(1:4)){ 
-  data<-list(y=Y[,2,m],group=Y[,5,m],delta=Y[,6,m])
+  data0<-C0[which(C0$m==m),]
+  data<-list(y=data0$y,group=data0$X,delta=data0$sigema)
   fit<- coxph(Surv(y, delta) ~ group+tt(group), data = data,tt =function(x,int,...) x * log(int))
   sum<-summary(fit)
  HR_TV[,m]<-exp(sum$coefficients[1,1]+sum$coefficients[2,1]*log(int))
@@ -531,13 +584,9 @@ for(t in fan[-1,1]){
 #normalization
 stan1<-HR_cox[4,1]
 redu<-abs(log(stan1)/mean(beta_post$y4f[fan[,1]]))
-for(m in c(1,3,4)){
-  direction<-ifelse(mean(beta_post[fan[,1],m+5])<0,1,(-1))
-  beta_post[fan[,1],m+5]<-beta_post[fan[,1],m+5]*redu*direction
+for(m in 1:4){
+  beta_post[fan[,1],m+5]<-beta_post[fan[,1],m+5]*redu
 }
-  m<-2
-  direction<-ifelse(mean(beta_post[fan[,1],m+5])>0,1,(-1))
-beta_post[fan[,1],m+5]<-beta_post[fan[,1],m+5]*redu*direction
 #for beta
 for(l in 1:2){  
 for(m in 1:4){
@@ -648,9 +697,10 @@ y_lwr<-c()
 y_upr[col]<-quantile(fitt, 0.975,na.rm=TRUE)
 y_lwr[col]<-quantile(fitt, 0.025,na.rm=TRUE)
   }
-stan<-(bcmc_wei[[m]][,1]-1)/((y_upr+y_lwr)/2-1)
-y_upr_1<-(y_upr-1)*stan+1
-y_lwr_1<-(y_lwr-1)*stan+1
+stan<-((bcmc_wei[[m]][,1])-1)/((max(y_upr)+min(y_lwr))/2-1)
+base_1<-mean(1-bcmc_wei[[m]][,1])
+y_upr_1<-(y_upr-1)*stan+1+base_1
+y_lwr_1<-(y_lwr-1)*stan+1-base_1
 t<-1:(k)
 plot(t, bcmc_wei[[m]][,1], type="l", col="steelblue2", ylim=c(0,3), xlab="Week", ylab="beta", main="Time-varying beta")
 lines(t,y_upr_1,type="l")
@@ -660,7 +710,7 @@ bcmc_wei[[m]][,2]<-y_upr_1
 bcmc_wei[[m]][,3]<-y_lwr_1
 min(y_lwr)
 colnames(bcmc_wei[[m]])<-c("bcmc","bcmc_lwr","bcmc_upr")
-y_cox<-cbind(rep(HR_cox[m,1],length(t)),rep(HR_cox[m,2],length(t)),rep(HR_cox[m,3],length(t)))
+y_cox<-cbind(rep(as.numeric(HR_cox[m,1]),length(t)),rep(as.numeric(HR_cox[m,2]),length(t)),rep(as.numeric(HR_cox[m,3]),length(t)))
 colnames(y_cox)<-c("cox","cox_lwr","cox_upr")
 y_tv<-cbind(HR_TV[,m],HR_TV[,m+4],HR_TV[,m+8])[c((1:8)*7,57:308),]
 colnames(y_tv)<-c("tv","tv_lwr","tv_upr")
@@ -725,10 +775,7 @@ y_upr[col]<-quantile(fitt, 0.975,na.rm=TRUE)
 y_lwr[col]<-quantile(fitt, 0.025,na.rm=TRUE)
   }
 base_1<-max(bcmc_lin[[m]][,1])
-#base_2<-min(bcmc_lin[[m]][,1])
 stan_1<-(bcmc_lin[[m]][,1]-base_1)/((y_upr)+(y_lwr)/2-base_1)
-#stan_2<-(bcmc_lin[[m]][,1]-base_2)/((y_upr)+(y_lwr)/2-base_2)
-#stan<-(bcmc_lin[[m]][,1])/((y_upr)+(y_lwr)/2)
 y_upr_1<-(y_upr-base_1)*stan_1+base_1
 y_lwr_1<-bcmc_lin[[m]][,1]*2-y_upr_1
 #m<-1,0.2
@@ -739,8 +786,8 @@ lines(t,y_lwr_1,type="l")
 lines(t,rep(1,k),type="l")
 bcmc_lin[[m]][,2]<-y_upr_1
 bcmc_lin[[m]][,3]<-y_lwr_1
-colnames(bcmc[[m]])<-c("bcmc","bcmc_lwr","bcmc_upr")
-y_cox<-cbind(rep(HR_cox[m,1],length(t)),rep(HR_cox[m,2],length(t)),rep(HR_cox[m,3],length(t)))
+colnames(bcmc_lin[[m]])<-c("bcmc","bcmc_lwr","bcmc_upr")
+y_cox<-cbind(rep(as.numeric(HR_cox[m,1]),length(t)),rep(as.numeric(HR_cox[m,2]),length(t)),rep(as.numeric(HR_cox[m,3]),length(t)))
 colnames(y_cox)<-c("cox","cox_lwr","cox_upr")
 y_tv<-cbind(HR_TV[,m],HR_TV[,m+4],HR_TV[,m+8])[fit_num,]
 colnames(y_tv)<-c("tv","tv_lwr","tv_upr")
@@ -888,33 +935,18 @@ for(m in 1:4){
   dat_all[[m]]<-dat_draw[,((m-1)*11+1):((m-1)*11+14)]
   colnames(dat_all[[m]])<-c("x","bcmc","bcmc_lwr","bcmc_upr","cox","cox_lwr","cox_upr","tv","tv_lwr","tv_upr","y_true")
 }
+
+library(survival)
+library(casebase)
+library(splines)
   m<-1
   m<-2
-  data<-data.frame(y=Y[,2,m],group=Y[,5,m],delta=Y[,6,m],tp=Y[,4,m])[1:l[m],]
+  m<-3
+  m<-4
+  C3<-C0[which(C0$m==m),]
+  data<-data.frame(y=C3$y,group=C3$X,delta=C3$sigema,tp=C3$J)
 fit[[m]]<-fitSmoothHazard(delta~group*ns(tp,df=3),
                     data=data,time="y")
-m<-3
-  data<-data.frame(y=Y[,2,m],group=Y[,5,m],delta=Y[,6,m],tp=Y[,4,m])[1:l[m],]
-for(m1 in 1){
-  data_1<-data.frame(y=Y[,2,m1],group=Y[,5,m1],delta=0,tp=Y[,4,m1])[1:l[m1],]
-  data<-rbind(data,data_1)
-}
-  table(data$delta)
-  table(data$y,data$delta)
-fit[[m]]<-fitSmoothHazard(delta~group*ns(tp,df=4),
-                    data=data,time="y")
-
-m<-4
-data<-data.frame(y=Y[,2,m],group=Y[,5,m],delta=Y[,6,m],tp=Y[,4,m])[1:l[m],]
-for(m1 in 2){
-  data_1<-data.frame(y=Y[,2,m1],group=Y[,5,m1],delta=0,tp=Y[,4,m1])[1:l[m1],]
-  data<-rbind(data,data_1)
-}
-  table(data$delta)
-  table(data$y,data$delta)
-fit[[m]]<-fitSmoothHazard(delta~group*ns(tp,df=4),
-                    data=data,time="y")
-
 dat_rcs<-list()
 newtime=c(1:260)
 newdata1=data.frame(group=factor("1",levels=c("1","0")),tp=newtime)
@@ -924,6 +956,136 @@ rcs<-data.frame(TVC=p1$hazard_ratio,TVC_lwr=p1$lowerbound,TVC_upr=p1$upperbound)
 dat_rcs[[m]]<-cbind(dat_all[[m]],rcs)
 }
 write.csv(dat_rcs,"~/Desktop/HR_TVC_ALL_norm.csv")
+end.rcode-->
+
+<p>13. the time chain data of overall survival pfs/pd-d in realworld analysis<p>
+<!--begin.rcode
+cl <- makeCluster(8-1) 
+registerDoParallel(cl)
+C_11<-list()
+for(kk in 1:(K+1)){#(K+1)
+  x<-ifelse(kk<=K,1,0)
+data<-data_tran[[kk]]
+c_1<-foreach(i = 1:n,
+               .combine = rbind,
+             .packages = c("dplyr"),
+               .errorhandling = "pass") %dopar% {
+                 c<-c(rep(0, 6))
+                 Time<-c(rep(1, K))
+                 s<-c(rep(0, K))
+  d<-data[i,]
+  sit<-min(which(is.na(d)==FALSE))#if have NA
+for(t in sit:(K-1)){
+  #survival time t
+  Time[t+1]<-ifelse(d[t]==d[t+1],Time[t]+1,1)
+  #state transition m
+  if ((d[t]==1)&(d[t+1]==2)) {s[t]<-1}
+  else if ((d[t]==2)&(d[t+1]==1)) {s[t]<-2}
+  else if ((d[t]==1)&(d[t+1]==3)) {s[t]<-3} 
+  else if ((d[t]==2)&(d[t+1]==3)) {s[t]<-4}
+  else s[t]<-0
+  }
+  Time<-Time[sit:(K-1)]
+  s<-s[sit:(K-1)]
+ #chain data
+if (any(s!= 0)==TRUE) {#transfer has occurred
+    if(last(Time)==1){# Transfer occurred at the last time point
+  for(l in 1:(sum(s!= 0))){#sum(s! = 0) denote the number of transitions occurred
+    ci<-c(ID=i,y=Time[which(s!= 0)][l],m=s[which(s!= 0)][l],"k"=which(s!= 0)[l],X=x,sigema=1)
+    ci<-as.data.frame(t(ci))
+    colnames(ci)<-c("ID","y","m","k","X","sigema")
+    c<-rbind(c,ci)
+  }
+    }
+    if(last(Time)>1){# No transfer occurred at the last point in time
+     for(l in 1:(sum(s!= 0))){
+   ci1<-c(ID=i,y=Time[which(s!= 0)][l],m=s[which(s!= 0)][l],"k"=which(s!= 0)[l],X=x,sigema=1)
+   ci1<-as.data.frame(t(ci1))
+    colnames(ci1)<-c("ID","y","m","k","X","sigema")
+   c<-rbind(c,ci1)
+     }
+    if(last(d)==1|last(d)==2){## The last status is not dead, indicating that there is censoring data
+   ci2<-c(ID=i,y=last(Time)-1,m=last(d),"k"=k-sit,X=x,sigema=0)
+   ci3<-c(ID=i,y=last(Time)-1,m=last(d)+2,"k"=k-sit,X=x,sigema=0)
+   #m=1 in the last time correspond the censoring data of m=1/m=3;m=2 in the last time correspond the censoring data of m=2/m=4 
+   ci2<-as.data.frame(t(ci2))
+   ci3<-as.data.frame(t(ci3))
+    colnames(ci2)<-c("ID","y","m","k","X","sigema")
+    colnames(ci3)<-c("ID","y","m","k","X","sigema")
+    c<-rbind(c,ci2,ci3)
+  }
+      if(last(d)==3){
+  c<-c
+     }
+    }
+     }#If last(time) is greater than 1 and is not in state 3, then the survival time of the individual in state 1/2 is the censoring data and the survival time is last(time)-1
+ if (any(s!= 0)==FALSE) {
+  ci<-c(ID=i,y=last(Time)-1,m=last(d),"k"=k-sit,X=x,sigema=0)
+  ci<-as.data.frame(t(ci))
+    colnames(ci)<-c("ID","y","m","k","X","sigema")
+    c<-as.data.frame(rbind(c,ci))
+   }
+
+                 return(c)
+               }
+C_1<-as.data.frame(c_1[which(!c_1$ID==0),])
+C_1$y<-ifelse(C_1$y<=56,(C_1$y)/7,(C_1$y)-56+8)
+summary(C_1$y)
+# m=1 means pfs-pd
+C_11[[kk]]<-C_1[which(C_1$m==1),]
+}
+stopCluster(cl)
+#include the chain data of 4 transition paths
+
+
+#m=2 means overall survival of pfs/pd-d，including pfs-pd-d，pfs-d，pd-d，pd-pfs-d
+cl <- makeCluster(8-1) 
+registerDoParallel(cl)
+C_22<-list()
+for(kk in 1:(K+1)){#(K+1)
+  x<-ifelse(kk<=K,1,0)
+data<-data_tran[[kk]]
+c_2<-foreach(i = 1:num,
+               .combine = rbind,
+             .packages = c("dplyr"),
+               .errorhandling = "pass") %dopar% {
+                 ci<-c(rep(NA, 6))
+                 Time<-c(rep(1, k))
+                 s<-c(rep(0, k))
+                 d<-dat_flw[i,]
+                 x<-dat_x[i,]
+                 sit<-min(which(is.na(d)==FALSE))
+ for(t in sit:(k-1)){
+  Time[t+1]<-ifelse(d[t]==d[t+1],Time[t]+1,1)
+ }
+  Time<-Time[sit:k]
+  x<-x[sit:k]              
+ if(last(d)==1|last(d)==2){
+  ci<-c(i,k-sit,2,k-sit,last(x),0)
+ }
+  if(last(d)==3){ 
+   if(d[sit]==1|d[sit]==2){
+ci<-c(i,min(which(d==3))-sit,2,min(which(d==3))-sit,as.numeric(x[min(which(d==3))-sit]),1)
+   }
+   if(d[sit]==3){ 
+   ci<-NA  
+   }
+  }
+  return(ci)
+               }
+C_2<-as.data.frame(c_2[which(!c_2$ID==0),])
+C_2$y<-ifelse(C_2$y<=56,(C_2$y)/7,(C_2$y)-56+8)
+summary(C_2$y)
+C_22[[kk]]<-C_2
+}
+stopCluster(cl)
+
+C<-list()
+for(kk in 1:(K+1)){
+  C[[kk]]<-rbind(C_11[[kk]],C_22[[kk]])
+}
+write.csv(C,"~/Desktop/realworld/C_sample_m2.csv")
+#include the chain data of 2 transition paths:pfs-pd,pfs/pd-d(overall survival)
 end.rcode-->
 
 </body>
