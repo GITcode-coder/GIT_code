@@ -1,0 +1,147 @@
+
+
+// 9. Table_1<p>
+library(readr)
+dat_con<- read_csv("~/Desktop/HR_ALL_con.csv")[,-1]
+dat_var<- read_csv("~/Desktop/HR_ALL_var.csv")[,-1]
+dat_norm<- read_csv("~/Desktop/HR_ALL_norm.csv")[,-1]
+mae<-0
+mse<-0
+mape<-0
+mae_5<-0
+mse_5<-0
+dat<-as.data.frame(0)
+for(m in 1:4){
+  dat<-dat_draw[,c((m-1)*11+2,(m-1)*11+5,(m-1)*11+8,(m-1)*11+11)]
+  colnames(dat)<-c("bcmc","cox","tv","true")
+  a<-mean(abs(dat$true-dat$cox))
+  b<-mean(abs(dat$true-dat$tv))
+  c<-mean(abs(dat$true-dat$bcmc),na.rm = TRUE)
+  mae<-c(mae,a,b,c)
+  d<-mean((dat$true-dat$cox)^2)
+  e<-mean((dat$true-dat$tv)^2)
+  f<-mean((dat$true-dat$bcmc)^2,na.rm = TRUE)
+  mse<-c(mse,d,e,f)
+  g<-paste0(mean(abs((dat$true-dat$cox)/dat$true))*100,"%")
+  h<-paste0(mean(abs((dat$true-dat$tv)/dat$true))*100,"%")
+  j<-paste0(mean(abs((dat$true-dat$bcmc)/dat$true),na.rm = TRUE)*100,"%")
+  mape<-c(mape,g,h,j)
+  #k<-paste0("(",round(t.test(abs(dat$true-dat$cox))$conf.int[1],2),",",round(t.test(abs(dat$true-dat$cox))$conf.int[2],2),")")
+  k<-0#for constant
+  l<-paste0("(",round(t.test(abs(dat$true-dat$tv))$conf.int[1],2),",",round(t.test(abs(dat$true-dat$tv))$conf.int[2],2),")")
+  m<-paste0("(",round(t.test(abs(dat$true-dat$bcmc))$conf.int[1],2),",",round(t.test(abs(dat$true-dat$bcmc))$conf.int[2],2),")")
+  mae_5<-c(mae_5,k,l,m)
+  #n<-paste0("(",round(t.test((dat$true-dat$cox)^2)$conf.int[1],2),",",round(t.test((dat$true-dat$cox)^2)$conf.int[2],2),")")
+   n<-0#for constant
+  o<-paste0("(",round(t.test((dat$true-dat$tv)^2)$conf.int[1],2),",",round(t.test((dat$true-dat$tv)^2)$conf.int[2],2),")")
+  p<-paste0("(",round(t.test((dat$true-dat$bcmc)^2)$conf.int[1],2),",",round(t.test((dat$true-dat$bcmc)^2)$conf.int[2],2),")")
+ mse_5<-c(mse_5,n,o,p)
+  }
+
+rmse<-sqrt(mse)
+out_con<-cbind(mae,mae_5,mse,mse_5,rmse,mape)[-1,]
+out_var<-cbind(mae,mae_5,mse,mse_5,rmse,mape)[-1,]
+out_norm<-cbind(mae,mae_5,mse,mse_5,rmse,mape)[-1,]
+
+write.csv(out_con,"~/Desktop/table1_con_z.csv")
+write.csv(out_var,"~/Desktop/table1_var_z.csv")
+write.csv(out_norm,"~/Desktop/table1_norm_z.csv")
+~~~~~~~~
+
+
+// 10. Table_2<p>
+t<-c(1:(k))
+dat_norm<-dat_draw
+a<-t[which.min(dat_norm$bcmc...3)]
+b<-t[which.max(dat_norm$bcmc...14)]
+c<-t[which.min(dat_norm$bcmc...25)]
+d<-t[which.min(dat_norm$bcmc...36)]
+
+top<-c(k/2,a,b,c,d)
+top
+os_norm<-c(0)
+for(k in top){
+  p_list_tr_var <- p_list
+  p_list_tr_var[,,(1:k)]<-p_list_tr[,,(1:k)]
+data_var <- as.data.frame(0, nrow = n, ncol = 260+1)
+for(i in 1:n){
+  current_state <- rep(1:2,each=n/2)[i]
+  data_var[i,1] <- c(current_state)  # Store sample sequences
+  for(t in 1:260){
+    next_state <- sample(1:states, 1, prob = p_list_tr_var[current_state,,t])
+  data_var[i,t+1] <- c(as.numeric(next_state))
+  current_state<-next_state
+  }
+}
+h<-c(1:k)
+os<-apply(data_var,1,function(x){h[which(x==3)[1]]})
+os_norm<-cbind(os_norm,os)
+}
+os_norm<-os_norm[,-1]
+summary(os_norm)
+OS_NORM_2<-c(0)
+for(c in 1:5){
+ mean<-mean(os_norm[,c],na.rm =TRUE)
+ mean_low<-t.test(os_norm[,c])$conf.int[1]
+ mean_up<-t.test(os_norm[,c])$conf.int[2]
+ os<-paste0(round(mean/4,2),"(",round(mean_low/4,2),"~",round(mean_up/4,2),")")
+ OS_NORM_2<-cbind(OS_NORM_2,c(mean,mean_low,mean_up,os))
+}
+colnames(OS_NORM_2)
+OS_NORM_2<-rbind(top,OS_NORM_2[,-1])
+write.csv(OS_NORM_2,"~/Desktop/table2_norm_z.csv")
+~~~~~~~~
+
+
+// 11. constant freeplot<p>
+library(readr)
+dat_con<- read_csv("~/Desktop/HR_ALL_con.csv")[,-1]
+
+esti<-c()
+for(m in 1:4){
+  dat<-dat_con[,c(((m-1)*11+2),((m-1)*11+5):((m-1)*11+8),((m-1)*11+11))]
+  colnames(dat)<-c("bcmc","cox","cox_lwr","cox_upr","tv","true")
+  a0<-dat$true[1]
+  a<-c(dat$cox[1],dat$cox_lwr[1],dat$cox_upr[1])
+  b<-c(mean(dat$tv),quantile(dat$tv, 0.025),quantile(dat$tv, 0.975))
+  c<-c(mean(dat$bcmc),quantile(dat$bcmc, 0.025),quantile(dat$bcmc, 0.975))
+  esti<-rbind(esti,a0,a,b,c)
+}
+ esti<-as.data.frame(esti)
+esti$ES_95<-paste0(round(esti[,1],2)," (",round(esti[,2],2),", ",round(esti[,3],2),")")
+
+write.csv(esti,"~/Desktop/table2_con_z.csv")
+~~~~~~~~
+
+
+// 12. TVC-Cox(B splines)<p>
+dat_all<-list()
+library(readr)
+dat_draw <- read_csv("~/Desktop/HR_ALL_norm.csv")[,-1]
+for(m in 1:4){
+  dat_all[[m]]<-dat_draw[,((m-1)*11+1):((m-1)*11+14)]
+  colnames(dat_all[[m]])<-c("x","bcmc","bcmc_lwr","bcmc_upr","cox","cox_lwr","cox_upr","tv","tv_lwr","tv_upr","y_true")
+}
+
+library(survival)
+library(casebase)
+library(splines)
+  m<-1
+  m<-2
+  m<-3
+  m<-4
+  C3<-C0[which(C0$m==m),]
+  data<-data.frame(y=C3$y,group=C3$X,delta=C3$sigema,tp=C3$J)
+fit[[m]]<-fitSmoothHazard(delta~group*ns(tp,df=3),
+                    data=data,time="y")
+dat_rcs<-list()
+newtime=c(1:260)
+newdata1=data.frame(group=factor("1",levels=c("1","0")),tp=newtime)
+for(m in 1:4){
+p1<-plot(fit[[m]],newdata=newdata1,var="group",increment=1,xvar="tp",type="hr",ci=T)
+rcs<-data.frame(TVC=p1$hazard_ratio,TVC_lwr=p1$lowerbound,TVC_upr=p1$upperbound)
+dat_rcs[[m]]<-cbind(dat_all[[m]],rcs)
+}
+write.csv(dat_rcs,"~/Desktop/HR_TVC_ALL_norm.csv")
+~~~~~~~~
+
