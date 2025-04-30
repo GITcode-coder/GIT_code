@@ -1,5 +1,3 @@
-BCMC-code
-
 //1. Assume the parameters of survival function and true value//
 /// 1.1 set observation intervals
 k<-260
