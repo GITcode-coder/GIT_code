@@ -1,4 +1,4 @@
-1. Extracted  survival time data
+4. Extracted  survival time data
 ///The repeated measurement data are organized into a matrix form of data[[k]], 
 ///where k represents the time of the initial intervention
 cl <- makeCluster(8-1) 
@@ -79,7 +79,7 @@ dim(C)
 write.csv(C,"~/Desktop/C_sample_con.csv")#_con,_var,_norm
 ～～～～～～～～～～～～～～～
 
-2. BCMC
+5. BCMC
 ///estimate dynamic hazard ratios (HRs) in a multi-state Markov modeling framework, 
 ///which was integrated into a Bayesian regularized Cox survival model.
 
