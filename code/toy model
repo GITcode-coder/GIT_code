@@ -1,0 +1,220 @@
+BCMC-code
+
+//1. Assume the parameters of survival function and true value//
+/// 1.1 set observation intervals
+k<-260
+interval<-1
+a<- seq(0,interval*k,interval)
+/// 1.2.set transition roads
+m<-4
+s<-c(1:m)
+#s<-1#PFS_PD
+#s<-2#PD_PFS
+#s<-3#PFS_D
+#s<-4#PD_D
+
+/// 1.3.Assume the baseline survival function parameters: lamda, alpha for the transition  
+lamda_pfs<-0.2
+alpha_pfs<-1.2
+lamda_pd<-0.2
+alpha_pd<-0.9
+s_pfs<-exp(-lamda_pfs*((a/10)^alpha_pfs))
+s_pd<-exp(-lamda_pd*((a/10)^alpha_pd))
+
+/// 1.4.Assume beta
+X<-1#The value of the covav riate, 1 represents the intervention
+beta<- matrix(0, nrow=m, ncol=k)
+#1. Constant
+for(t in 1:k){
+  beta[1,t]<-(-log(2))
+  beta[2,t]<-log(2)
+  beta[3,t]<-(-log(2))
+  beta[4,t]<-(-log(2))
+}
+
+write.csv(beta[,1:(k)],"~/Desktop/beta_true_con.csv")
+
+
+#2. Monotonic
+beta<- matrix(0, nrow=m, ncol=k)
+for(t in 1:k){
+  beta[1,t]<-(-3.5)+log(t/20+15)#
+  beta[2,t]<-4-log(t/10+25)
+  beta[3,t]<-(-3.5)+log(t/20+15)
+  beta[4,t]<-(-3.5)+log(t/20+15)
+}
+
+write.csv(beta,"~/Desktop/beta_true_var.csv")
+
+
+#3.U-shaped 
+beta<- matrix(0, nrow=m, ncol=k)
+  for(t in 1:k){
+    x<-t
+  si<-60
+  mu<-130
+  beta[1,t]<-(-1)*40*si^(-1)*exp((-(x-130)^2)/(2*si^2))#
+  beta[2,t]<-45*si^(-1)*exp((-(x-130)^2)/(2*si^2))
+  beta[3,t]<-(-1)*40*si^(-1)*exp((-(x-130)^2)/(2*si^2))#
+  beta[4,t]<-(-1)*40*si^(-1)*exp((-(x-130)^2)/(2*si^2))#
+  }
+ write.csv(beta,"~/Desktop/beta_true_norm.csv")
+
+
+HR<- matrix(0, nrow=m, ncol=k)
+HR<-exp(beta)
+
+plot(1:k, HR[1,][1:k], type="l", col="green3", ylim=c(0,3), xlab="Time", ylab="HR", main="Dynamic HR (True value)",bty ="l",lwd=2)
+lines(1:k, HR[2,][1:k], type="l", col="orange",lwd=2)
+lines(1:k, rep(1,k)[1:k], lty=2, col="red",lwd=2)
+legend("topright", legend=c("Other paths", "PD-PFS","HR=1"), col=c("green3", "orange", "red"), bty ="n",lty=1, ,lwd=2,cex=0.8)
+
+#Definite test group
+s_pfs_tr<-c(s_pfs[1],s_pfs[-1]^(exp(X*beta[1,])))
+s_pd_tr<-c(s_pd[1],s_pd[-1]^(exp(X*beta[2,])))
+~~~~~~~~~
+
+
+
+
+
+// 2. Generate the transition probability matrix
+library(expm)
+library(pracma)
+/// 2.1 generate transition probability matrixs of k periods
+
+# control group
+p_list <- c(rep(NA, 3*3*k))
+dim(p_list)<-c(3,3,k)
+for (t in 1:k) {
+  p <- matrix(0, nrow = 3, ncol = 3)  
+  col_names <-c("PFS","PD","D")
+  row_names <- c("PFS","PD","D")
+  p[1,1]<-s_pfs[t+1]/s_pfs[t]
+  p[1,3]<-0.001
+  p[1,2]<-max((1-p[1,1]-p[1,3]),0)
+  p[2,2]<-s_pd[t+1]/s_pd[t]
+  p[2,3]<-0.002
+  p[2,1]<-max((1-p[2,2]-p[2,3]),0)
+  p[3,1]<-0
+  p[3,2]<-0
+  p[3,3]<-1
+  p_list[,,t] <- p  
+}
+
+plot(1:k, p_list[1,2,1:k], type="l", col="steelblue2", ylim=c(0,0.08), xlab="Time", ylab="P", main="Probability",bty ="l",lwd=2)
+lines(1:k, p_list[2,1,1:k], type="l", col="purple",lwd=2)
+lines(1:k, p_list[1,3,1:k], type="l", col="palegreen3",lwd=2)
+lines(1:k, p_list[2,3,1:k], type="l", col="gold1",lwd=2)
+legend("topright", legend=c("PFS-PD", "PD-PFS","PFS-D","PD-D"), col=c("steelblue2", "purple", "palegreen3", "gold1"), lty=1, ,lwd=2,cex=0.8, bty = "n")
+
+# simulated the period of 1-8 weeks, 56 points were inserted
+e<-7
+int<-c((1:56)/7,9:k)
+K<-length(int)
+
+library(pracma)
+p_list_ste<- c(rep(0, 3*3*K))
+dim(p_list_ste)<-c(3,3,K)
+for(i in 1:8){
+  p_list_ste[,,((i-1)*7+1):((i-1)*7+7)]<-abs(sqrtm(sqrtm(sqrtm(p_list[,,1])$B)$B)$B)
+}
+p_list_ste[,,57:K]<-p_list[,,9:k]
+
+#treatment group
+X<-1
+p_list_tr <- c(rep(0, 3*3*(k)))
+dim(p_list_tr)<-c(3,3,(k))
+for (t in 1:(k)) {
+  p <- matrix(0, nrow = 3, ncol = 3)  
+  col_names <-c("PFS","PD","D")
+  row_names <- c("PFS","PD","D")
+  p[1,3]<-0.001*(exp(X*beta[3,t]))
+  p[1,1]<-s_pfs_tr[t+1]/s_pfs_tr[t]#alpha=1，=exp(-lamda)
+  p[1,2]<-max(1-p[1,1]-p[1,3],0)
+  p[2,3]<-0.002*(exp(X*beta[4,t]))
+  p[2,2]<-s_pd_tr[t+1]/s_pd_tr[t]
+  p[2,1]<-max((1-p[2,2]-p[2,3]),0)
+  p[3,1]<-0
+  p[3,2]<-0
+  p[3,3]<-1
+  p_list_tr[,,t] <- p 
+}
+
+plot(1:(k), p_list_tr[1,2,1:(k)], type="l", col="steelblue2", ylim=c(0,0.08), xlab="Time", ylab="P", main="Probability",bty ="l",lwd=2)
+lines(1:(k), p_list_tr[2,1,1:(k)], type="l", col="purple",lwd=2)
+lines(1:(k), p_list_tr[1,3,1:(k)], type="l", col="palegreen3",lwd=2)
+lines(1:(k), p_list_tr[2,3,1:(k)], type="l", col="gold1",lwd=2)
+legend("topright", legend=c("PFS-PD", "PD-PFS","PFS-D","PD-D"), col=c("steelblue2", "purple", "palegreen3", "gold1"), lty=1,lwd=2, cex=0.8, bty = "n")
+
+# simulated the period of 1-8 weeks, 56 points were inserted
+e<-7
+int<-c((1:56)/8,9:(k))
+
+p_list_tr_ste<- c(rep(0, 3*3*K))
+dim(p_list_tr_ste)<-c(3,3,K)
+for(i in 1:8){
+  p_list_tr_ste[,,((i-1)*7+1):((i-1)*7+7)]<-abs(sqrtm(sqrtm(sqrtm(p_list_tr[,,i])$B)$B)$B)
+}
+p_list_tr_ste[,,57:K]<-p_list_tr[,,9:(k)]
+~~~~~~~~~
+
+
+
+// 3.Simulate the state transition 
+
+library(foreach)
+library(iterators)
+library(parallel)
+library(doParallel)
+
+/// 3.1. Repeat the cycle to generate sample data _ treatment group
+states<- 3  # number of states
+n<-100 # The number of samples n<-5000
+k<-260# the number of loops
+data_tran<-list()
+n.cores <- detectCores()
+n.cores
+cl <- makeCluster(n.cores-1) 
+registerDoParallel(cl)
+for(kk in 1:K){
+      p_k<- p_list_ste
+     p_k[,,(kk:K)]<- p_list_tr_ste[,,(kk:K)]
+data<- as.data.frame(NA, nrow = n, ncol = K+1)
+data<- foreach(i = 1:n,
+               .combine = rbind,
+               .errorhandling = "pass") %dopar% {
+  current_state <- ifelse(i<=(n/2),1,2)
+  da<-c(current_state)
+  # Store sample sequences
+  for(t in 1:K){
+    next_state <- sample(1:states, 1, prob = p_k[current_state,,t])
+  da<- c(da,next_state)
+  current_state<-next_state
+  }
+  return(da)
+               }
+ data_tran[[kk]]<-data  
+}
+
+
+/// 3.2. Repeat the cycle to generate sample data _ control group
+p_k<-p_list_ste
+data<-foreach(i = 1:n,
+               .combine = rbind,
+               .errorhandling = "pass") %dopar% {
+  current_state <- ifelse(i<=(n/2),1,2)
+  da<-c(current_state)
+  # Store sample sequences
+  for(t in 1:length(int)){
+    next_state <- sample(1:states, 1, prob = p_list_tr_ste[current_state,,t])
+  da<- c(da,next_state)
+  current_state<-next_state
+  }
+  return(da)
+               }
+data_tran[[K+1]]<-data
+stopCluster(cl)
+write.csv(data_tran,"~/Desktop/data_tran_con.csv")#_con,_var,_norm
+~~~~~~~~~
+
