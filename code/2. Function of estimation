@@ -1,101 +1,187 @@
-4. Extracted  survival time data
-///The repeated measurement data are organized into a matrix form of data[[k]], 
-///where k represents the time of the initial intervention
-cl <- makeCluster(8-1) 
-registerDoParallel(cl)
-C<-list()
-for(kk in 1:(K+1)){#(K+1)
-  x<-ifelse(kk<=K,1,0)
-data<-data_tran[[kk]]
-c_1<-foreach(i = 1:n,
+1. Extracted  survival time data
+1.1 Function 1:Extracted  survival time data
+
+///Data preparation
+///the transition states in our methods is 3; M means the number of transition paths,M=4 or 2; 4 paths includ PFS-PD,PD-PFS,PFS-D,PD-D; 2 paths includ PFS-PD,PFS/PD-D
+M<-4  
+///int means the obseverd time point,K=length of int;
+k<-260
+Insert<-7
+Start<-8
+int<-c(seq(0,Start,by=1/Insert)[-1],(Start+1):(k))
+
+///data_tran is a  K+1 lists data of transition states; K means the first time of individual to accept treatment; K+1 list is the control group; 
+data_tran_0<-read.csv("~/Desktop/data_tran.csv")[,-1]
+for(kk in (K+1)){
+  data_tran[[k]]<-data_tran_0[,((kk-1)*(K+1)+1):(kk*(K+1))]
+}
+
+parallel_surtime<-function(data){
+num<-dim(data)[1]
+k0<-dim(data)[2]
+C_1<-foreach(i = 1:num,
                .combine = rbind,
              .packages = c("dplyr"),
                .errorhandling = "pass") %dopar% {
-                 c<-c(rep(0, 6))
-                 Time<-c(rep(1, K))
-                 s<-c(rep(0, K))
-  d<-data[i,]
-  sit<-min(which(is.na(d)==FALSE))#if have NA
-for(t in sit:(K-1)){
-  #survival time t
+                 c<-c(rep(0, 4))
+                 Time<-c(rep(1, k0))
+                 s<-c(rep(0, k0))
+                 d<-as.numeric(data[i,])
+                 sit<-min(which(is.na(d)==FALSE))#if have NA
+for(t in sit:(k0-1)){
   Time[t+1]<-ifelse(d[t]==d[t+1],Time[t]+1,1)
-  #state transition m
   if ((d[t]==1)&(d[t+1]==2)) {s[t]<-1}
   else if ((d[t]==2)&(d[t+1]==1)) {s[t]<-2}
   else if ((d[t]==1)&(d[t+1]==3)) {s[t]<-3} 
   else if ((d[t]==2)&(d[t+1]==3)) {s[t]<-4}
   else s[t]<-0
   }
-  Time<-Time[sit:(K-1)]
-  s<-s[sit:(K-1)]
- #chain data
+  Time<-Time[sit:k0]
+  s<-s[sit:k0]
 if (any(s!= 0)==TRUE) {#transfer has occurred
-    if(last(Time)==1){# Transfer occurred at the last time point
   for(l in 1:(sum(s!= 0))){#sum(s! = 0) denote the number of transitions occurred
-    ci<-c(ID=i,y=Time[which(s!= 0)][l],m=s[which(s!= 0)][l],"k"=which(s!= 0)[l],X=x,sigema=1)
+    ci<-c(ID=i,y=Time[which(s!= 0)][l],m=s[which(s!= 0)][l],sigema=1)
     ci<-as.data.frame(t(ci))
-    colnames(ci)<-c("ID","y","m","k","X","sigema")
+    colnames(ci)<-c("ID","y","m","sigema")
     c<-rbind(c,ci)
   }
-    }
+
     if(last(Time)>1){# No transfer occurred at the last point in time
-     for(l in 1:(sum(s!= 0))){
-   ci1<-c(ID=i,y=Time[which(s!= 0)][l],m=s[which(s!= 0)][l],"k"=which(s!= 0)[l],X=x,sigema=1)
-   ci1<-as.data.frame(t(ci1))
-    colnames(ci1)<-c("ID","y","m","k","X","sigema")
-   c<-rbind(c,ci1)
-     }
     if(last(d)==1|last(d)==2){## The last status is not dead, indicating that there is censoring data
-   ci2<-c(ID=i,y=last(Time)-1,m=last(d),"k"=k-sit,X=x,sigema=0)
-   ci3<-c(ID=i,y=last(Time)-1,m=last(d)+2,"k"=k-sit,X=x,sigema=0)
-   #m=1 in the last time correspond the censoring data of m=1/m=3;m=2 in the last time correspond the censoring data of m=2/m=4 
+   ci2<-c(ID=i,y=last(Time)-1,m=last(d),sigema=0)
+   ci3<-c(ID=i,y=last(Time)-1,m=last(d)+2,sigema=0)
+   #m=1 in the last time correspond the censoring data of m=1/m=3;
+   #m=2 in the last time correspond the censoring data of m=2/m=4
    ci2<-as.data.frame(t(ci2))
    ci3<-as.data.frame(t(ci3))
-    colnames(ci2)<-c("ID","y","m","k","X","sigema")
-    colnames(ci3)<-c("ID","y","m","k","X","sigema")
+    colnames(ci2)<-c("ID","y","m","sigema")
+    colnames(ci3)<-c("ID","y","m","sigema")
     c<-rbind(c,ci2,ci3)
   }
-      if(last(d)==3){
-  c<-c
-     }
     }
      }#If last(time) is greater than 1 and is not in state 3, then the survival time of the individual in state 1/2 is the censoring data and the survival time is last(time)-1
  if (any(s!= 0)==FALSE) {
-  ci<-c(ID=i,y=last(Time)-1,m=last(d),"k"=k-sit,X=x,sigema=0)
-  ci<-as.data.frame(t(ci))
-    colnames(ci)<-c("ID","y","m","k","X","sigema")
-    c<-as.data.frame(rbind(c,ci))
+  ci1<-c(ID=i,y=last(Time)-1,m=last(d),sigema=0)
+  ci2<-c(ID=i,y=last(Time)-1,m=last(d)+2,sigema=0)
+  ci1<-as.data.frame(t(ci1))
+  ci2<-as.data.frame(t(ci2))
+    colnames(ci1)<-c("ID","y","m","sigema")
+    colnames(ci2)<-c("ID","y","m","sigema")
+    c<-as.data.frame(rbind(c,ci1,ci2))
+ }
+#pfs/pd-d
+   if(last(d)==1|last(d)==2){
+    ci3<-c(ID=i,y=K-sit,m=5,sigema=0) 
+     ci3<-as.data.frame(t(ci3))
+    colnames(ci3)<-c("ID","y","m","sigema")
+    c<-as.data.frame(rbind(c,ci3))  
    }
-
+  if(last(d)==3){ 
+   if(d[sit]==1|d[sit]==2){
+ci3<-c(ID=i,y=min(which(d==3))-sit,m=5,sigema=1)
+ci3<-as.data.frame(t(ci3))
+    colnames(ci3)<-c("ID","y","m","sigema")
+    c<-as.data.frame(rbind(c,ci3))  
+   }
+   if(d[sit]==3){ 
+   c<-c
+   }
+  }
+  c<-c[-1,]
                  return(c)
                }
-C_1<-as.data.frame(c_1[which(!c_1$ID==0),])
-C_1$y<-ifelse(C_1$y<=56,(C_1$y)/7,(C_1$y)-56+8)
-summary(C_1$y)
-C[[kk]]<-C_1
+C_1<-as.data.frame(C_1)
+return(C_1)
 }
-stopCluster(cl)
-dim(C)
-write.csv(C,"~/Desktop/C_sample_con.csv")#_con,_var,_norm
-～～～～～～～～～～～～～～～
 
-5. BCMC
-///estimate dynamic hazard ratios (HRs) in a multi-state Markov modeling framework, 
-///which was integrated into a Bayesian regularized Cox survival model.
-
-library(rjags)
-install.packages('coda')
-library(coda)
+1.2 Function 1.2:Extracted  survival time data for K list of data
+data_sur_extract<-function(data_tran,int,M){
 library(foreach)
 library(iterators)
 library(parallel)
 library(doParallel)
-library(R2jags)
+library(data.table)
+C0<-c(0)
+K<-length(int)
+for(kk in 1:(K+1)){#(K+1)
+  x<-ifelse(kk<=K,1,0)
+data<-data_tran[[kk]]
+
+n.cores <- detectCores()
+n.cores<-7
+cl <- makeCluster(n.cores-1) 
+registerDoParallel(cl)
+C_1<-parallel_surtime(data)
+stopCluster(cl)
+
+C_1<-cbind(C_1[,1:3],K=kk,X=x,C_1[,4])
+C0<-rbind(C0,C_1)
+}
+C0<-C0[-1,]
+C0$y<-int[C0$y]
+summary(C0$y)
+
+if (M==4){C<-C0[-which(C0$m==5),]}
+if (M==2){C<-C0[which((C0$m==1)|(C0$m==5)),]
+C[which(C$m==5),3]<-2
+}
+return(C)
+}
+data_sur<-data_sur_extract(data_tran,int,M)
+～～～～～～～～～～～～～～～
+
+2. Function 2:beta estimation of Fre-Cox
+beta_of_HR_cox<-function(data_sur,M){
+library(survival)
+HR_cox<-matrix(0,M,3)
+for(m in c(1:M)){
+  data0<-data_sur[which(data_sur$m==m),]
+  data<-list(y=data0$y,group=data0$X,delta=data0$sigema)
+  res.cox <- coxph(Surv(y, delta) ~ group, data = data)
+  sum<-summary(res.cox)
+  HR_cox[m,]<-cbind(sum$coefficients[2],sum$conf.int[3],sum$conf.int[4])
+}
+colnames(HR_cox)<-c("HR","low","upr")
+return(HR_cox)
+}
+HR_cox<-beta_of_HR_cox(data_sur,M)
+～～～～～～～～～～～～～～～
+
+3. Function 3:beta estimation of TVC-Cox
+beta_of_HR_TV<-function(data_sur,M,int,K){
+library(survival)
+library(survminer)
+HR_TV<-matrix(0,K,M)
+HR_TV_low<-matrix(0,K,M)
+HR_TV_upr<-matrix(0,K,M)
+for(m in c(1:M)){ 
+  data0<-data_sur[which(data_sur$m==m),]
+  data<-list(y=data0$y,group=data0$X,delta=data0$sigema)
+  fit<- coxph(Surv(y, delta) ~ group+tt(group), data = data,tt =function(x,int,...) x * log(int))
+  sum<-summary(fit)
+ HR_TV[,m]<-exp(sum$coefficients[1,1]+sum$coefficients[2,1]*log(int))
+ HR_TV_low[,m]<-exp(log(sum$conf.int[1,3])+log(sum$conf.int[2,3])*log(int))
+ HR_TV_upr[,m]<-exp(log(sum$conf.int[1,4])+log(sum$conf.int[2,4])*log(int))
+}
+HR_TV<-cbind(HR_TV,HR_TV_low,HR_TV_upr)
+return(HR_TV)
+}
+HR_TV<-beta_of_HR_TV(data_sur,M,int,K)
+
+
+4. Function 4:beta estimation of BCMC (after filtering)
+///estimate dynamic hazard ratios (HRs) in a multi-state Markov modeling framework, 
+///which was integrated into a Bayesian regularized Cox survival model.
+
+beta_of_bcmc<-function(data_sur,int,M){
+library(job)
+library(rjags)
 library(coda)
+library(R2jags)
 library(lattice)
 library(MCMCvis)
-# Dimension of vector d is k
-a <- 0
+#2.1 Dimension of vector d is K
+a <-c(0)
 d<-int
 K<-length(int)
 for(j in 2:K){
@@ -103,125 +189,111 @@ a[j] <- (d[j-1] + d[j])/2
 }
 a[j+1] <- d[j] + (d[j] - d[j-1])/2
 
-
+#for K=j=1
 j<-1
-# 1. Load  data
-c<-6#c("ID","t","m","j","X","sigema")
-m<-4
-
-#2 Bayesian Estimation
-C_2<-rbind(C[[j]],C[[K+1]])
-l<-c(rep(NA,4))
-for(m in 1:4){
+#2.2. Load  data
+c<-6#c("ID","y","m","K","X","sigema")
+C_2<-data_sur[which((data_sur$K==j)|(data_sur$K==K+1)),]
+l<-c(rep(NA,M))
+for(m in 1:M){
 l[m]<-length(which(C_2$m==m))
 }
 row<-max(l)
-Y<-c(rep(NA, row*c*m))
-dim(Y)<-c(row,c,m)
+Y<-c(rep(NA, row*c*M))
+dim(Y)<-c(row,c,M)
 colnames(Y) <-c("ID","t","m","j","X","sigema")
-for(m in 1:4){
+for(m in 1:M){
   len1<-l[m]
  Y[1:len1,,m]<-as.matrix(C_2[which(C_2$m==m),])
 }
 
-m<-4
-#"ID","t","m","j","X","sigema"
+#"ID","y","m","j","X","sigema"
 Y2<-Y[,2,]
-Y6<-Y[,6,]
+delta<-Y[,6,]
 interval<-1
 
-# Construct H[i,j,m] and N[i,j,m]
-
-h<-matrix(0,row,m)
-nn<-matrix(0,row,m)
-for(m in 1:4){
+#2.3 Construct H[i,j,m] and N[i,j,m]
+h<-matrix(0,row,M)
+nn<-matrix(0,row,M)
+for(m in 1:M){
 for(i in 1:l[m]){
-h0<- ifelse(Y2[i,m]*interval < a[j],0,1)
-aa0<-ifelse(Y2[i,m]*interval > a[j+1],0,1)
-h[i,m]<-h0*(min(Y2[i,m]*interval,a[j+1])-a[j])
+h0<- ifelse(Y2[i,m] < a[j],0,1)
+aa0<-ifelse(Y2[i,m] > a[j+1],0,1)
+h[i,m]<-h0*(min(Y2[i,m],a[j+1])-a[j])
 nn[i,m]<-h0*aa0*delta[i,m]
 }
 }
 
 Y5<-Y[,5,]
-lam<-matrix(0,m,K)
-beta<-matrix(0,m,K)
+lam<-matrix(0,M,K)
+beta<-matrix(0,M,K)
 lam1<-lam[,j]
 beta1<-beta[,j]
 
+#2.4  Construct model
 model_string <- textConnection("
   model{
 # Likelihood Construction
-for(m in 1:4){
+for(m in 1:M){
 for(i in 1:l[m]){
 nn[i,m]~ dpois(exp(beta1[m]*(Y5[i,m]))*h[i,m]*lam1[m])
 }}
 
   # Prior for lambdas
 lamm <- 10000*(0.01) # exp(-a[2]*0.01) = 0.995
-for(m in 1:4){
+for(m in 1:M){
 lam1[m] ~ dgamma(lamm,10000)#j=1
 }
 
 # Inferences for the HRs and prior on the betas
 # relative hazard
-for(m in 1:4){
+for(m in 1:M){
 beta1[m] ~ dnorm(0,0.000001)
 }# 
 }
 ")
-data_list <- list(l=l,Y5=Y5,h=h,nn=nn)
-m<-4
-inits <- list(beta1=rnorm(m),lam1=rep(0.1,m))
+data_list <- list(l=l,Y5=Y5,h=h,nn=nn,M=M)
+inits <- list(beta1=rnorm(M),lam1=rep(0.1,M))
 model <- jags.model(model_string,data = data_list, inits=inits, n.chains=2,n.adapt=1000)
-#(4)generate 20000 post-burn-in samples
+#2.5 Bayesian Estimation
 params <- c("beta1")#,"lam","S.pos","S.neg","S.diff") 
 sample <- coda.samples(model,variable.names=params,n.iter=20000, progress.bar="none")#
-#(5)Summarize the output
+#Summarize the output
 sum<-summary(sample)
-beta_post0_con<-cbind(mean=sum[["statistics"]][,1],lwr=sum[["quantiles"]][,1],upr=sum[["quantiles"]][,5])
+beta_post0<-cbind(mean=sum[["statistics"]][,1],lwr=sum[["quantiles"]][,1],upr=sum[["quantiles"]][,5])
 
-#～～～～
-m<-4
-f<-rep(0,m)
-e<-rep(0,m)
-lam<-matrix(0,m,K)
-beta<-matrix(0,m,K)
-
+#2.6 for K=j=2:K
+f<-rep(0,M)
+e<-rep(0,M)
+lam<-matrix(0,M,K)
+beta<-matrix(0,M,K)
+n.cores <- detectCores()
 cl <- makeCluster(n.cores-1) 
 registerDoParallel(cl)
-
-beta_post1_con<-foreach(j = 2:K,
+beta_post1<-foreach(j = 2:K,
                .combine = rbind,
               .packages = c("R2jags","coda","lattice","MCMCvis"),
                .errorhandling = "pass") %dopar% {
-#1.data list
-lam1<-lam[,j]
-beta1<-beta[,j]
-
-C_2<-rbind(C[[j]],C[[K+1]])
-l<-c(rep(NA,4))
-for(m in 1:4){
+C_2<-data_sur[which((data_sur$K==j)|(data_sur$K==K+1)),]
+l<-c(rep(NA,M))
+for(m in 1:M){
 l[m]<-length(which(C_2$m==m))
 }
 row<-max(l)
-Y<-c(rep(NA, row*c*m))
-dim(Y)<-c(row,c,m)
+Y<-c(rep(NA, row*c*M))
+dim(Y)<-c(row,c,M)
 colnames(Y) <-c("ID","t","m","j","X","sigema")
-for(m in 1:4){
+for(m in 1:M){
   len1<-l[m]
  Y[1:len1,,m]<-as.matrix(C_2[which(C_2$m==m),])
 }
-
-m<-4
-#"ID","t","m","j","X","sigema"
 Y2<-Y[,2,]
-Y6<-Y[,6,]
+delta<-Y[,6,]
 interval<-1
 
-h<-matrix(0,max(l),m)
-nn<-matrix(0,max(l),m)
-for(m in 1:4){
+h<-matrix(0,max(l),M)
+nn<-matrix(0,max(l),M)
+for(m in 1:M){
 for(i in 1:l[m]){
 h0<- ifelse(Y2[i,m]*interval < a[j],0,1)
 aa0<-ifelse(Y2[i,m]*interval > a[j+1],0,1)
@@ -230,20 +302,25 @@ nn[i,m]<-h0*aa0*delta[i,m]
 }
 }
 a1<-a[j+1]-a[j]
-#2.constrcut model
+
+Y5<-Y[,5,]
+lam1<-lam[,j]
+beta1<-beta[,j]
+
+#constrcut model
 model_string <- textConnection("
   model{
 # Likelihood Construction
-for(m in 1:4){
+for(m in 1:M){
 for(i in 1:l[m]){
-nn[i,m]~ dpois(exp(beta1[m]*(Y1[i,m]))*h[i,m]*lam1[m])
+nn[i,m]~ dpois(exp(beta1[m]*(Y5[i,m]))*h[i,m]*lam1[m])
 }}
 
   # Prior for lambdas
 lamstar <- 0.05# Select value or set prior for lamstar
 w<-0.01
 # lamstar ~ dgamma(a,ww) a=0.05*ww ww=0.01
-for(m in 1:4){
+for(m in 1:M){
 # prior on baseline hazard bits
 f[m] <- w*a1
 e[m] <- lamstar*f[m]
@@ -252,24 +329,87 @@ lam1[m] ~ dgamma(e[m],f[m])
 
 # Inferences for the HRs and prior on the betas
 # relative hazard
-for(m in 1:4){
+for(m in 1:M){
 beta1[m] ~ dnorm(0,0.000001)
 } 
 }")
-data_list <- list(l=l,Y1=Y1,h=h,nn=nn)
-m<-4
-inits <- list(beta1=rnorm(m),lam1=rep(0.1,m))
+data_list <- list(l=l,Y5=Y5,h=h,nn=nn,a1=a1,M=M)
+inits <- list(beta1=rnorm(M),lam1=rep(0.1,M))
 model <- jags.model(model_string,data = data_list, inits=inits, n.chains=2,n.adapt=1000)
-#(4)generate 20000 post-burn-in samples
+#generate 20000 post-burn-in samples
 params <- c("beta1")#,"lam","S.pos","S.neg","S.diff") 
 #params <- c("HR")
 sample <- coda.samples(model,variable.names=params,n.iter=20000, progress.bar="none")#很快2min
-# (5) Summarize the output
+#Summarize the output
 sum<-summary(sample)
 outcome<-as.data.frame(cbind(mean=sum[["statistics"]][,1],lwr=sum[["quantiles"]][,1],upr=sum[["quantiles"]][,5]))#差别不大
-return(outcome3)
-}
+return(outcome)
+ }
 stopCluster(cl)
 
-beta_post_1<-as.data.frame(rbind(beta_post0_con,beta_post1_con))
-write.csv(beta_post_1,"~/Desktop/beta_bcmc_con.csv")#_con,_var,_norm
+beta_post_1<-as.data.frame(rbind(beta_post0,beta_post1))
+return(beta_post_1)
+}
+
+bcmc<-beta_of_bcmc(data_sur,int,M)
+～～～～～～～～～～～～～
+
+5. Function 5: Filter,Normalize,Average
+beta_stan_of_bcmc<-function(bcmc,int,M,HR_cox){
+beta_post<-list()
+be<-c(0)
+for(m in 1:M){
+  for(t in 1:K){
+  row<-m+M*(t-1)
+  be<-rbind(be,bcmc[row,1:2])#mean
+  }
+  beta_post[[m]]<-be[-1,]
+  be<-c(0)
+}
+summary(beta_post)
+#Removal of extremes
+for(m in 1:M){
+  up<-quantile(beta_post[[m]][,1], 0.975)
+  lw<-quantile(beta_post[[m]][,1], 0.025)
+  mean<-beta_post[[m]][,1]
+  row<-which((mean>up)|(mean<lw)|abs(mean)>500)
+for(t in row){
+  beta_post[[m]][t,]<-beta_post[[m]][max(1,(t-1)),]
+}
+}
+
+#normalization
+stan<-log(HR_cox[M,1])
+stan_ci<-log(HR_cox[M,1])-log(HR_cox[M,2])
+mean<-mean(beta_post[[M]][,1])
+mean_ci<-mean(beta_post[[M]][,1]-beta_post[[M]][,2])
+redu_mean<-as.numeric(abs(stan/mean))
+redu_ci<-as.numeric(abs(stan_ci/mean_ci))
+for(m in 1:M){
+ mean<-beta_post[[m]][,1]
+ ci<-beta_post[[m]][,1]-beta_post[[m]][,2]
+ direction<-ifelse(mean(mean)<0,1,(-1))
+ if((m==2)&(M==4)){direction<-ifelse(mean(mean)>0,1,(-1))} 
+ beta_post[[m]][,1]<-mean*redu_mean*direction
+ beta_post[[m]][,2]<-ci*redu_ci
+}
+
+#Average 
+for(m in 1:M){
+for(col in 1:2){
+for(t in 1:K){
+  beta_post[[m]][t,col]<-(mean(beta_post[[m]][(max(1,(t-5))):(min(K,(t+5))),col]))
+}
+}
+ beta_post[[m]][,2]<-beta_post[[m]][,1]-beta_post[[m]][,2]
+}
+summary(beta_post[[2]][,1])
+summary(beta_post[[1]][,2])
+beta_bcmc_stan<-cbind(beta_post[[1]][,1],beta_post[[2]][,1],beta_post[[3]][,1],beta_post[[4]][,1],beta_post[[1]][,2],beta_post[[2]][,2],beta_post[[3]][,2],beta_post[[4]][,2])
+colnames(beta_bcmc_stan)<-c("bcmc1","bcmc2","bcmc3","bcmc4","lwr1","lwr2","lwr3","lwr4")
+return(beta_bcmc_stan)
+}
+beta_bcmc_stan<-beta_stan_of_bcmc(bcmc,int,M,HR_cox)
+
+
+
