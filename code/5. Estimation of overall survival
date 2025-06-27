@@ -1,138 +1,132 @@
+# Data preparation
+#the transition states in our methods is 3; M means the number of transition paths,M=4 or 2; 
+#4 paths includ PFS-PD,PD-PFS,PFS-D,PD-D; 2 paths includ PFS-PD,PFS/PD-D
+M<-2
+#int means the obseverd time point,K=length of int;
+k<-260
+Insert<-7
+Start<-8
+int<-c(seq(0,Start,by=1/Insert)[-1],(Start+1):(k))
 
-// 13. the time chain data of overall survival pfs/pd-d in realworld analysis<p>
-cl <- makeCluster(8-1) 
-registerDoParallel(cl)
-C_11<-list()
-for(kk in 1:(K+1)){#(K+1)
-  x<-ifelse(kk<=K,1,0)
-data<-data_tran[[kk]]
-c_1<-foreach(i = 1:n,
+# data_tran is a  K+1 lists data of transition states; K means the first time of individual to accept treatment; K+1 list is the control group; 
+data_tran_0<-read.csv("~/Desktop/data_tran.csv")[,-1]
+for(kk in (K+1)){
+  data_tran[[k]]<-data_tran_0[,((kk-1)*(K+1)+1):(kk*(K+1))]
+}
+
+1. Function 1:Extracted  survival time data
+parallel_surtime<-function(data){
+num<-dim(data)[1]
+k0<-dim(data)[2]
+C_1<-foreach(i = 1:num,
                .combine = rbind,
              .packages = c("dplyr"),
                .errorhandling = "pass") %dopar% {
-                 c<-c(rep(0, 6))
-                 Time<-c(rep(1, K))
-                 s<-c(rep(0, K))
-  d<-data[i,]
-  sit<-min(which(is.na(d)==FALSE))#if have NA
-for(t in sit:(K-1)){
-  #survival time t
+                 c<-c(rep(0, 4))
+                 Time<-c(rep(1, k0))
+                 s<-c(rep(0, k0))
+                 d<-as.numeric(data[i,])
+                 sit<-min(which(is.na(d)==FALSE))#if have NA
+for(t in sit:(k0-1)){
   Time[t+1]<-ifelse(d[t]==d[t+1],Time[t]+1,1)
-  #state transition m
+ 
   if ((d[t]==1)&(d[t+1]==2)) {s[t]<-1}
   else if ((d[t]==2)&(d[t+1]==1)) {s[t]<-2}
   else if ((d[t]==1)&(d[t+1]==3)) {s[t]<-3} 
   else if ((d[t]==2)&(d[t+1]==3)) {s[t]<-4}
   else s[t]<-0
   }
-  Time<-Time[sit:(K-1)]
-  s<-s[sit:(K-1)]
 
-
- #chain data
+  Time<-Time[sit:k0]
+  s<-s[sit:k0]
 if (any(s!= 0)==TRUE) {#transfer has occurred
-    if(last(Time)==1){# Transfer occurred at the last time point
   for(l in 1:(sum(s!= 0))){#sum(s! = 0) denote the number of transitions occurred
-    ci<-c(ID=i,y=Time[which(s!= 0)][l],m=s[which(s!= 0)][l],"k"=which(s!= 0)[l],X=x,sigema=1)
+    ci<-c(ID=i,y=Time[which(s!= 0)][l],m=s[which(s!= 0)][l],sigema=1)
     ci<-as.data.frame(t(ci))
-    colnames(ci)<-c("ID","y","m","k","X","sigema")
+    colnames(ci)<-c("ID","y","m","sigema")
     c<-rbind(c,ci)
   }
-    }
+
     if(last(Time)>1){# No transfer occurred at the last point in time
-     for(l in 1:(sum(s!= 0))){
-   ci1<-c(ID=i,y=Time[which(s!= 0)][l],m=s[which(s!= 0)][l],"k"=which(s!= 0)[l],X=x,sigema=1)
-   ci1<-as.data.frame(t(ci1))
-    colnames(ci1)<-c("ID","y","m","k","X","sigema")
-   c<-rbind(c,ci1)
-     }
-
-
     if(last(d)==1|last(d)==2){## The last status is not dead, indicating that there is censoring data
-   ci2<-c(ID=i,y=last(Time)-1,m=last(d),"k"=k-sit,X=x,sigema=0)
-   ci3<-c(ID=i,y=last(Time)-1,m=last(d)+2,"k"=k-sit,X=x,sigema=0)
-   #m=1 in the last time correspond the censoring data of m=1/m=3;m=2 in the last time correspond the censoring data of m=2/m=4 
+   ci2<-c(ID=i,y=last(Time)-1,m=last(d),sigema=0)
+   ci3<-c(ID=i,y=last(Time)-1,m=last(d)+2,sigema=0)
+   #m=1 in the last time correspond the censoring data of m=1/m=3;
+   #m=2 in the last time correspond the censoring data of m=2/m=4
+   
    ci2<-as.data.frame(t(ci2))
    ci3<-as.data.frame(t(ci3))
-    colnames(ci2)<-c("ID","y","m","k","X","sigema")
-    colnames(ci3)<-c("ID","y","m","k","X","sigema")
+    colnames(ci2)<-c("ID","y","m","sigema")
+    colnames(ci3)<-c("ID","y","m","sigema")
     c<-rbind(c,ci2,ci3)
   }
-      if(last(d)==3){
-  c<-c
-     }
     }
      }#If last(time) is greater than 1 and is not in state 3, then the survival time of the individual in state 1/2 is the censoring data and the survival time is last(time)-1
- 
-
-if (any(s!= 0)==FALSE) {
-  ci<-c(ID=i,y=last(Time)-1,m=last(d),"k"=k-sit,X=x,sigema=0)
-  ci<-as.data.frame(t(ci))
-    colnames(ci)<-c("ID","y","m","k","X","sigema")
-    c<-as.data.frame(rbind(c,ci))
+ if (any(s!= 0)==FALSE) {
+  ci1<-c(ID=i,y=last(Time)-1,m=last(d),sigema=0)
+  ci2<-c(ID=i,y=last(Time)-1,m=last(d)+2,sigema=0)
+  ci1<-as.data.frame(t(ci1))
+  ci2<-as.data.frame(t(ci2))
+    colnames(ci1)<-c("ID","y","m","sigema")
+    colnames(ci2)<-c("ID","y","m","sigema")
+    c<-as.data.frame(rbind(c,ci1,ci2))
+ }
+#pfs/pd-d
+   if(last(d)==1|last(d)==2){
+    ci3<-c(ID=i,y=K-sit,m=5,sigema=0) 
+     ci3<-as.data.frame(t(ci3))
+    colnames(ci3)<-c("ID","y","m","sigema")
+    c<-as.data.frame(rbind(c,ci3))  
    }
-
+  if(last(d)==3){ 
+   if(d[sit]==1|d[sit]==2){
+ci3<-c(ID=i,y=min(which(d==3))-sit,m=5,sigema=1)
+ci3<-as.data.frame(t(ci3))
+    colnames(ci3)<-c("ID","y","m","sigema")
+    c<-as.data.frame(rbind(c,ci3))  
+   }
+   if(d[sit]==3){ 
+   c<-c
+   }
+  }
+  c<-c[-1,]
                  return(c)
                }
-C_1<-as.data.frame(c_1[which(!c_1$ID==0),])
-C_1$y<-ifelse(C_1$y<=56,(C_1$y)/7,(C_1$y)-56+8)
-summary(C_1$y)
-
-# m=1 means pfs-pd
-C_11[[kk]]<-C_1[which(C_1$m==1),]
+C_1<-as.data.frame(C_1)
+return(C_1)
 }
-stopCluster(cl)
 
-
-#m=2 means overall survival of pfs/pd-d，including pfs-pd-d，pfs-d，pd-d，pd-pfs-d
-cl <- makeCluster(8-1) 
-registerDoParallel(cl)
-C_22<-list()
+2. Function 2:Extracted  survival time data for k list of data
+data_sur_extract<-function(data_tran,int,M){
+library(foreach)
+library(iterators)
+library(parallel)
+library(doParallel)
+library(data.table)
+C0<-c(0)
+K<-length(int)
 for(kk in 1:(K+1)){#(K+1)
   x<-ifelse(kk<=K,1,0)
 data<-data_tran[[kk]]
-c_2<-foreach(i = 1:num,
-               .combine = rbind,
-             .packages = c("dplyr"),
-               .errorhandling = "pass") %dopar% {
-                 ci<-c(rep(NA, 6))
-                 Time<-c(rep(1, k))
-                 s<-c(rep(0, k))
-                 d<-dat_flw[i,]
-                 x<-dat_x[i,]
-                 sit<-min(which(is.na(d)==FALSE))
- for(t in sit:(k-1)){
-  Time[t+1]<-ifelse(d[t]==d[t+1],Time[t]+1,1)
- }
-  Time<-Time[sit:k]
-  x<-x[sit:k]              
- if(last(d)==1|last(d)==2){
-  ci<-c(i,k-sit,2,k-sit,last(x),0)
- }
-  if(last(d)==3){ 
-   if(d[sit]==1|d[sit]==2){
-ci<-c(i,min(which(d==3))-sit,2,min(which(d==3))-sit,as.numeric(x[min(which(d==3))-sit]),1)
-   }
-   if(d[sit]==3){ 
-   ci<-NA  
-   }
-  }
-  return(ci)
-               }
 
-C_2<-as.data.frame(c_2[which(!c_2$ID==0),])
-C_2$y<-ifelse(C_2$y<=56,(C_2$y)/7,(C_2$y)-56+8)
-summary(C_2$y)
-C_22[[kk]]<-C_2
-}
+n.cores <- detectCores()
+n.cores<-7
+cl <- makeCluster(n.cores-1) 
+registerDoParallel(cl)
+C_1<-parallel_surtime(data)
 stopCluster(cl)
 
-
-C<-list()
-for(kk in 1:(K+1)){
-  C[[kk]]<-rbind(C_11[[kk]],C_22[[kk]])
+C_1<-cbind(C_1[,1:3],K=kk,X=x,C_1[,4])
+C0<-rbind(C0,C_1)
 }
-write.csv(C,"~/Desktop/realworld/C_sample_m2.csv")
-#include the chain data of 2 transition paths:pfs-pd,pfs/pd-d(overall survival)
+C0<-C0[-1,]
+C0$y<-int[C0$y]
+summary(C0$y)
 
-</body>
+if (M==4){C<-C0[-which(C0$m==5),]}
+if (M==2){C<-C0[which((C0$m==1)|(C0$m==5)),]
+C[which(C$m==5),3]<-2
+}
+return(C)
+}
+data_sur<-data_sur_extract(data_tran,int,M)
