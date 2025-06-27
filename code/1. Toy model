@@ -79,45 +79,40 @@ s_pd_tr<-c(s_pd[1],s_pd[-1]^(exp(X*beta[2,])))
 // 2. Generate the transition probability matrix
 library(expm)
 library(pracma)
-/// 2.1 generate transition probability matrixs of k periods
-
-# control group
+#  generate transition probability matrixs of k periods
 p_list <- c(rep(NA, 3*3*k))
 dim(p_list)<-c(3,3,k)
 for (t in 1:k) {
   p <- matrix(0, nrow = 3, ncol = 3)  
   col_names <-c("PFS","PD","D")
   row_names <- c("PFS","PD","D")
-  p[1,1]<-s_pfs[t+1]/s_pfs[t]
   p[1,3]<-0.001
-  p[1,2]<-max((1-p[1,1]-p[1,3]),0)
-  p[2,2]<-s_pd[t+1]/s_pd[t]
+  p[1,2]<-1-s_pfs[t+1]/s_pfs[t]
+  p[1,1]<-1-p[1,2]-p[1,3]
+   
+  p[2,1]<-1-s_pd[t+1]/s_pd[t]
   p[2,3]<-0.002
-  p[2,1]<-max((1-p[2,2]-p[2,3]),0)
+  p[2,2]<-1-p[2,1]-p[2,3]
+  
   p[3,1]<-0
   p[3,2]<-0
   p[3,3]<-1
   p_list[,,t] <- p  
 }
 
-plot(1:k, p_list[1,2,1:k], type="l", col="steelblue2", ylim=c(0,0.08), xlab="Time", ylab="P", main="Probability",bty ="l",lwd=2)
-lines(1:k, p_list[2,1,1:k], type="l", col="purple",lwd=2)
-lines(1:k, p_list[1,3,1:k], type="l", col="palegreen3",lwd=2)
-lines(1:k, p_list[2,3,1:k], type="l", col="gold1",lwd=2)
-legend("topright", legend=c("PFS-PD", "PD-PFS","PFS-D","PD-D"), col=c("steelblue2", "purple", "palegreen3", "gold1"), lty=1, ,lwd=2,cex=0.8, bty = "n")
-
 # simulated the period of 1-8 weeks, 56 points were inserted
-e<-7
-int<-c((1:56)/7,9:k)
+Insert<-7
+Start<-8
+int<-c(seq(0,Start,by=1/Insert)[-1],(Start+1):(k))
 K<-length(int)
 
 library(pracma)
 p_list_ste<- c(rep(0, 3*3*K))
 dim(p_list_ste)<-c(3,3,K)
-for(i in 1:8){
-  p_list_ste[,,((i-1)*7+1):((i-1)*7+7)]<-abs(sqrtm(sqrtm(sqrtm(p_list[,,1])$B)$B)$B)
+for(i in 1:Start){
+  p_list_ste[,,((i-1)*Insert+1):(i*Insert)]<-abs(sqrtm(sqrtm(sqrtm(p_list[,,1])$B)$B)$B)
 }
-p_list_ste[,,57:K]<-p_list[,,9:k]
+p_list_ste[,,(Insert*Start+1):K]<-p_list[,,(Start+1):k]
 
 #treatment group
 X<-1
@@ -128,33 +123,29 @@ for (t in 1:(k)) {
   col_names <-c("PFS","PD","D")
   row_names <- c("PFS","PD","D")
   p[1,3]<-0.001*(exp(X*beta[3,t]))
-  p[1,1]<-s_pfs_tr[t+1]/s_pfs_tr[t]#alpha=1，=exp(-lamda)
-  p[1,2]<-max(1-p[1,1]-p[1,3],0)
+  p[1,2]<-max((1-s_pfs_tr[t+1]/s_pfs_tr[t]),0)#alpha=1，=exp(-lamda)
+  p[1,1]<-1-p[1,2]-p[1,3]
+  
   p[2,3]<-0.002*(exp(X*beta[4,t]))
-  p[2,2]<-s_pd_tr[t+1]/s_pd_tr[t]
-  p[2,1]<-max((1-p[2,2]-p[2,3]),0)
+  p[2,1]<-max((1-s_pd_tr[t+1]/s_pd_tr[t]),0)
+  p[2,2]<-(1-p[2,2]-p[2,3])
+  
   p[3,1]<-0
   p[3,2]<-0
   p[3,3]<-1
   p_list_tr[,,t] <- p 
 }
-
-plot(1:(k), p_list_tr[1,2,1:(k)], type="l", col="steelblue2", ylim=c(0,0.08), xlab="Time", ylab="P", main="Probability",bty ="l",lwd=2)
-lines(1:(k), p_list_tr[2,1,1:(k)], type="l", col="purple",lwd=2)
-lines(1:(k), p_list_tr[1,3,1:(k)], type="l", col="palegreen3",lwd=2)
-lines(1:(k), p_list_tr[2,3,1:(k)], type="l", col="gold1",lwd=2)
-legend("topright", legend=c("PFS-PD", "PD-PFS","PFS-D","PD-D"), col=c("steelblue2", "purple", "palegreen3", "gold1"), lty=1,lwd=2, cex=0.8, bty = "n")
-
 # simulated the period of 1-8 weeks, 56 points were inserted
-e<-7
-int<-c((1:56)/8,9:(k))
+Insert<-7
+Start<-8
+int<-c(seq(0,Start,by=1/Insert)[-1],(Start+1):(k))
 
 p_list_tr_ste<- c(rep(0, 3*3*K))
 dim(p_list_tr_ste)<-c(3,3,K)
-for(i in 1:8){
-  p_list_tr_ste[,,((i-1)*7+1):((i-1)*7+7)]<-abs(sqrtm(sqrtm(sqrtm(p_list_tr[,,i])$B)$B)$B)
+for(i in 1:Start){
+  p_list_tr_ste[,,((i-1)*Insert+1):((i-1)*Insert+Insert)]<-abs(sqrtm(sqrtm(sqrtm(p_list_tr[,,i])$B)$B)$B)
 }
-p_list_tr_ste[,,57:K]<-p_list_tr[,,9:(k)]
+p_list_tr_ste[,,(Insert*Start+1):K]<-p_list_tr[,,(Start+1):(k)]
 ~~~~~~~~~
 
 
@@ -166,18 +157,21 @@ library(iterators)
 library(parallel)
 library(doParallel)
 
-/// 3.1. Repeat the cycle to generate sample data _ treatment group
 states<- 3  # number of states
-n<-100 # The number of samples n<-5000
-k<-260# the number of loops
+n<-5000 # The number of samples n<-5000
+K<-length(int)
+p_list   #the transition probability of control group
+p_list_tr    #the transition probability of treatment group
+
+/// the function of Simulate the state transition
+stat_transition<-function(states,n,K,p_list_ste,p_list_tr_ste){
 data_tran<-list()
 n.cores <- detectCores()
-n.cores
 cl <- makeCluster(n.cores-1) 
 registerDoParallel(cl)
-for(kk in 1:K){
-      p_k<- p_list_ste
-     p_k[,,(kk:K)]<- p_list_tr_ste[,,(kk:K)]
+for(kk in 1:(K+1)){
+      p_k<- p_list
+ if(kk<(K+1)) {p_k[,,(kk:K)]<- p_list_tr[,,(kk:K)]} 
 data<- as.data.frame(NA, nrow = n, ncol = K+1)
 data<- foreach(i = 1:n,
                .combine = rbind,
@@ -194,25 +188,10 @@ data<- foreach(i = 1:n,
                }
  data_tran[[kk]]<-data  
 }
-
-
-/// 3.2. Repeat the cycle to generate sample data _ control group
-p_k<-p_list_ste
-data<-foreach(i = 1:n,
-               .combine = rbind,
-               .errorhandling = "pass") %dopar% {
-  current_state <- ifelse(i<=(n/2),1,2)
-  da<-c(current_state)
-  # Store sample sequences
-  for(t in 1:length(int)){
-    next_state <- sample(1:states, 1, prob = p_list_tr_ste[current_state,,t])
-  da<- c(da,next_state)
-  current_state<-next_state
-  }
-  return(da)
-               }
-data_tran[[K+1]]<-data
 stopCluster(cl)
-write.csv(data_tran,"~/Desktop/data_tran_con.csv")#_con,_var,_norm
+return(data_tran[[kk]])
+}
+data_tran<-stat_transition(states,n,K,p_list_ste,p_list_tr_ste)
+write.csv(data_tran,"~/Desktop/data_tran.csv")
 ~~~~~~~~~
 
