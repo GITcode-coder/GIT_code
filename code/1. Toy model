@@ -1,197 +1,214 @@
-//1. Assume the parameters of survival function and true value//
-/// 1.1 set observation intervals
-k<-260
+<!--begin.rcode
+#1. Set up the parameters of survival function and true value scenarios
+###1.1 set observation intervals 
+K<-260 #time point
 interval<-1
-a<- seq(0,interval*k,interval)
-/// 1.2.set transition roads
-m<-4
-s<-c(1:m)
+tp<- seq(0,interval*K,interval)
+###1.2 set transition roads
+M<-4
+s<-c(1:M)
 #s<-1#PFS_PD
 #s<-2#PD_PFS
 #s<-3#PFS_D
 #s<-4#PD_D
 
-/// 1.3.Assume the baseline survival function parameters: lamda, alpha for the transition  
-lamda_pfs<-0.2
-alpha_pfs<-1.2
-lamda_pd<-0.2
-alpha_pd<-0.9
-s_pfs<-exp(-lamda_pfs*((a/10)^alpha_pfs))
-s_pd<-exp(-lamda_pd*((a/10)^alpha_pd))
-
-/// 1.4.Assume beta
-X<-1#The value of the covav riate, 1 represents the intervention
-beta<- matrix(0, nrow=m, ncol=k)
-#1. Constant
-for(t in 1:k){
+###1.3 Three senarios of beta
+beta<- matrix(0, nrow=M, ncol=K)
+#1). Constant
+for(t in 1:K){
   beta[1,t]<-(-log(2))
   beta[2,t]<-log(2)
   beta[3,t]<-(-log(2))
   beta[4,t]<-(-log(2))
 }
 
-write.csv(beta[,1:(k)],"~/Desktop/beta_true_con.csv")
-
-
-#2. Monotonic
-beta<- matrix(0, nrow=m, ncol=k)
-for(t in 1:k){
+#2). Monotonic
+beta<- matrix(0, nrow=M, ncol=K)
+for(t in 1:K){
   beta[1,t]<-(-3.5)+log(t/20+15)#
   beta[2,t]<-4-log(t/10+25)
   beta[3,t]<-(-3.5)+log(t/20+15)
   beta[4,t]<-(-3.5)+log(t/20+15)
 }
 
-write.csv(beta,"~/Desktop/beta_true_var.csv")
-
-
-#3.U-shaped 
-beta<- matrix(0, nrow=m, ncol=k)
-  for(t in 1:k){
-    x<-t
+#3).U-shaped 
+beta<- matrix(0, nrow=M, ncol=K)
+for(t in 1:K){
+  x<-t
   si<-60
-  mu<-130
-  beta[1,t]<-(-1)*40*si^(-1)*exp((-(x-130)^2)/(2*si^2))#
-  beta[2,t]<-45*si^(-1)*exp((-(x-130)^2)/(2*si^2))
-  beta[3,t]<-(-1)*40*si^(-1)*exp((-(x-130)^2)/(2*si^2))#
-  beta[4,t]<-(-1)*40*si^(-1)*exp((-(x-130)^2)/(2*si^2))#
-  }
- write.csv(beta,"~/Desktop/beta_true_norm.csv")
+  mu<-K/2
+  beta[1,t]<-(-1)*40*si^(-1)*exp((-(x-mu)^2)/(2*si^2))#
+  beta[2,t]<-45*si^(-1)*exp((-(x-mu)^2)/(2*si^2))
+  beta[3,t]<-(-1)*40*si^(-1)*exp((-(x-mu)^2)/(2*si^2))#
+  beta[4,t]<-(-1)*40*si^(-1)*exp((-(x-mu)^2)/(2*si^2))#
+}
 
-
-HR<- matrix(0, nrow=m, ncol=k)
+HR<-  matrix(0, nrow=M, ncol=K)
 HR<-exp(beta)
-
-plot(1:k, HR[1,][1:k], type="l", col="green3", ylim=c(0,3), xlab="Time", ylab="HR", main="Dynamic HR (True value)",bty ="l",lwd=2)
-lines(1:k, HR[2,][1:k], type="l", col="orange",lwd=2)
-lines(1:k, rep(1,k)[1:k], lty=2, col="red",lwd=2)
-legend("topright", legend=c("Other paths", "PD-PFS","HR=1"), col=c("green3", "orange", "red"), bty ="n",lty=1, ,lwd=2,cex=0.8)
-
-#Definite test group
-s_pfs_tr<-c(s_pfs[1],s_pfs[-1]^(exp(X*beta[1,])))
-s_pd_tr<-c(s_pd[1],s_pd[-1]^(exp(X*beta[2,])))
+###1.4 Set up the baseline survival function parameters: lambda, kappa for the transition  
+#Define the transfer path parameters
+params <- list(
+  c("PFS", "PD", 1.2, 0.001,1), # PFS -> PD
+  c("PD", "PFS", 0.9, 0.01,2),# PD -> PFS
+  c("PFS", "Death", 1, 0.0002,3),  # PFS -> Death      
+  c("PD", "Death", 1, 0.002,4)    # PD -> Death
+)
+end.rcode-->
 ~~~~~~~~~
 
 
+<!--begin.rcode
+#2. Data-generating mechanism
+n_patients <- 1000 # The number of samples
+K <- 260
+q <- 1
+set.seed(123)
 
+###2.1 Set up Covariate1 (binary 0/1, constant)
+x_list <- list()
+x_list[[1]] <- matrix(1, nrow = n_patients, ncol = K)
+x_list[[1]][1:(n_patients/2),] <- 0  
+names(x_list) <- c("Covariate1")
 
+###2.2 Set up beta  (q × K)(q=1)
+beta_list <- list()
+beta_list[[1]] <- beta
+names(beta_list) <- c("Covariate1")
 
-// 2. Generate the transition probability matrix
-library(expm)
-library(pracma)
-#  generate transition probability matrixs of k periods
-p_list <- c(rep(NA, 3*3*k))
-dim(p_list)<-c(3,3,k)
-for (t in 1:k) {
-  p <- matrix(0, nrow = 3, ncol = 3)  
-  col_names <-c("PFS","PD","D")
-  row_names <- c("PFS","PD","D")
-  p[1,3]<-0.001
-  p[1,2]<-1-s_pfs[t+1]/s_pfs[t]
-  p[1,1]<-1-p[1,2]-p[1,3]
-   
-  p[2,1]<-1-s_pd[t+1]/s_pd[t]
-  p[2,3]<-0.002
-  p[2,2]<-1-p[2,1]-p[2,3]
+###2.3 sampling time from weibull (considering covariate effects)
+sample_tran_time <- function(kappa, lambda, beta_row_index, patient_id, entry_time, tmax, q,beta_list,x_list) {
+  # Generate uniform random number
+  U <- runif(1)
+  if (U <= 0) return(Inf)
+  if (U >= 1) return(entry_time)
   
-  p[3,1]<-0
-  p[3,2]<-0
-  p[3,3]<-1
-  p_list[,,t] <- p  
-}
+  entry_time_int <- ceiling(entry_time)
+  if (entry_time_int < entry_time) entry_time_int <- entry_time_int + 1
 
-# simulated the period of 1-8 weeks, 56 points were inserted
-Insert<-7
-Start<-8
-int<-c(seq(0,Start,by=1/Insert)[-1],(Start+1):(k))
-K<-length(int)
-
-library(pracma)
-p_list_ste<- c(rep(0, 3*3*K))
-dim(p_list_ste)<-c(3,3,K)
-for(i in 1:Start){
-  p_list_ste[,,((i-1)*Insert+1):(i*Insert)]<-abs(sqrtm(sqrtm(sqrtm(p_list[,,1])$B)$B)$B)
-}
-p_list_ste[,,(Insert*Start+1):K]<-p_list[,,(Start+1):k]
-
-#treatment group
-X<-1
-p_list_tr <- c(rep(0, 3*3*(k)))
-dim(p_list_tr)<-c(3,3,(k))
-for (t in 1:(k)) {
-  p <- matrix(0, nrow = 3, ncol = 3)  
-  col_names <-c("PFS","PD","D")
-  row_names <- c("PFS","PD","D")
-  p[1,3]<-0.001*(exp(X*beta[3,t]))
-  p[1,2]<-max((1-s_pfs_tr[t+1]/s_pfs_tr[t]),0)#alpha=1，=exp(-lamda)
-  p[1,1]<-1-p[1,2]-p[1,3]
+  max_search_time <- min(tmax, entry_time_int + 1000)
   
-  p[2,3]<-0.002*(exp(X*beta[4,t]))
-  p[2,1]<-max((1-s_pd_tr[t+1]/s_pd_tr[t]),0)
-  p[2,2]<-(1-p[2,2]-p[2,3])
-  
-  p[3,1]<-0
-  p[3,2]<-0
-  p[3,3]<-1
-  p_list_tr[,,t] <- p 
-}
-# simulated the period of 1-8 weeks, 56 points were inserted
-Insert<-7
-Start<-8
-int<-c(seq(0,Start,by=1/Insert)[-1],(Start+1):(k))
-
-p_list_tr_ste<- c(rep(0, 3*3*K))
-dim(p_list_tr_ste)<-c(3,3,K)
-for(i in 1:Start){
-  p_list_tr_ste[,,((i-1)*Insert+1):((i-1)*Insert+Insert)]<-abs(sqrtm(sqrtm(sqrtm(p_list_tr[,,i])$B)$B)$B)
-}
-p_list_tr_ste[,,(Insert*Start+1):K]<-p_list_tr[,,(Start+1):(k)]
-~~~~~~~~~
-
-
-
-// 3.Simulate the state transition 
-
-library(foreach)
-library(iterators)
-library(parallel)
-library(doParallel)
-
-states<- 3  # number of states
-n<-5000 # The number of samples n<-5000
-K<-length(int)
-p_list   #the transition probability of control group
-p_list_tr    #the transition probability of treatment group
-
-/// the function of Simulate the state transition
-stat_transition<-function(states,n,K,p_list_ste,p_list_tr_ste){
-data_tran<-list()
-n.cores <- detectCores()
-cl <- makeCluster(n.cores-1) 
-registerDoParallel(cl)
-for(kk in 1:(K+1)){
-      p_k<- p_list
- if(kk<(K+1)) {p_k[,,(kk:K)]<- p_list_tr[,,(kk:K)]} 
-data<- as.data.frame(NA, nrow = n, ncol = K+1)
-data<- foreach(i = 1:n,
-               .combine = rbind,
-               .errorhandling = "pass") %dopar% {
-  current_state <- ifelse(i<=(n/2),1,2)
-  da<-c(current_state)
-  # Store sample sequences
-  for(t in 1:K){
-    next_state <- sample(1:states, 1, prob = p_k[current_state,,t])
-  da<- c(da,next_state)
-  current_state<-next_state
+  for (t in entry_time_int:max_search_time) {
+    cumulative_hazard <- 0
+    
+    for (s in entry_time_int:t) {
+      s_state <- s - entry_time
+      if (s_state <= 0) next
+      
+      h0 <- lambda * kappa * (s_state)^(kappa - 1)
+      
+      time_idx <- min(max(1, s), K)
+      eta <- 0
+      for (j in 1:q) {
+        x_j <- x_list[[j]][patient_id, time_idx]
+        beta_j <- beta_list[[j]][beta_row_index, time_idx]
+        eta <- eta + x_j * beta_j
+      }
+      
+      cumulative_hazard <- cumulative_hazard + h0 * exp(eta)
+    }
+    
+    if (exp(-cumulative_hazard) < U) {
+      return(t)
+    }
   }
-  return(da)
-               }
- data_tran[[kk]]<-data  
+  
+  return(max_search_time)
 }
-stopCluster(cl)
-return(data_tran[[kk]])
+
+###2.4 Simulate the complete trajectory of a single patient
+sim_one_patient <- function(patient_id, params, tmax = K, start_state) {
+ current_state <- start_state
+  entry_time <- 0
+  traj <- data.frame(time = entry_time, state = current_state, event = "Enter")
+  
+  while (current_state != "Death" & entry_time < tmax) {
+  
+    possible_trans <- Filter(function(x) x[1] == current_state, params)
+    if (length(possible_trans) == 0) break
+    
+    times <- numeric(length(possible_trans))
+    
+    for (j in 1:length(possible_trans)) {
+      trans <- possible_trans[[j]]
+      kappa <- as.numeric(trans[3])
+      lambda <- as.numeric(trans[4])
+     beta_row_index <- as.numeric(trans[5]) # m=1,2,3,4
+      
+      t_sample <- sample_tran_time(kappa, lambda,  beta_row_index, patient_id, entry_time, tmax, q,beta_list,x_list)
+      times[j] <- t_sample
+    }
+    
+  
+    next_time <- min(times)
+    if (next_time >= tmax) break
+    
+    idx <- which.min(times)
+    next_state <- possible_trans[[idx]][2]
+    
+    traj <- rbind(traj,
+                  data.frame(time = next_time, 
+                            state = next_state, 
+                            event = "Transfer"))
+    
+    current_state <- next_state
+    entry_time <- next_time
+    
+    if (nrow(traj) > 30) break
+  }
+  
+  if (current_state != "Death" & entry_time < tmax) {
+    traj <- rbind(traj,
+                  data.frame(time = tmax,
+                            state = current_state,
+                            event = "Censored"))
+  }
+  
+  return(traj)
 }
-data_tran<-stat_transition(states,n,K,p_list_ste,p_list_tr_ste)
-write.csv(data_tran,"~/Desktop/data_tran.csv")
+
+###2.5 Convert continuous trajectories into discrete-time state chains
+sur_traj <- function(traj, tp) {
+  states <- rep(NA, length(tp))
+  for (i in 1:length(tp)) {
+    t <- tp[i]
+    idx <- which(traj$time <= t)
+    if (length(idx) > 0) {
+      states[i] <- traj$state[max(idx)]
+    }
+  }
+  return(states)
+}
+
+###2.6 simulation
+tp <- 0:K
+tmax <- K
+n_sim <- n_patients  
+set.seed(123)
+discrete_chains <- list()
+
+for (i in 1:n_sim) {
+  start_state <- sample(c("PFS", "PD"), 1, prob = c(2/3, 1/3))
+  cont_traj <- sim_one_patient(i, params, tmax,start_state)
+  states <- sur_traj(cont_traj, tp)
+  discrete_chains[[i]] <- data.frame(
+    PatientID = i,
+    Time = tp,
+    State = states
+  )
+}
+
+###2.7 Convert to wide format
+library(tidyr)
+wide_data <- do.call(rbind, lapply(discrete_chains, function(df) {
+  df$State_Num <- as.numeric(factor(df$State,
+                                   levels = c("PFS", "PD", "Death"),
+                                   labels = c(1, 2, 3)))
+  df_wide <- as.data.frame(t(df$State_Num))
+  names(df_wide) <- paste0("t_", tp)
+  df_wide
+}))
+wide_data<-as.data.frame(wide_data)
+write.csv(wide_data,"~/Desktop/BCMC_1_reslut/con/wide_data.csv")#_con,_var,_norm
+end.rcode-->
 ~~~~~~~~~
 
