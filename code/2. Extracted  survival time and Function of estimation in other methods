@@ -77,6 +77,10 @@ return(C1)
 }
 C1<-data_sur_extract(wide_data,x_list,q)
 write.csv(C1,"~/Desktop/BCMC_1_reslut/con/C1.csv")#_con,_var,_norm
+
+C2<-C1[which(C1$m==5),]
+####C2 represent the survival time of overall survival pfs/pd-d in realworld analysis
+
 end.rcode-->
 ~~~~~~~~~~~~~
 
