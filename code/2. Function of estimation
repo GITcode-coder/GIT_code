@@ -146,9 +146,127 @@ write.csv(HR_TV,"~/Desktop/BCMC_1_reslut/con/HR_TV.csv")
 HR_rcs<-beta_of_HR_rcs(data_sur,M,K)
 write.csv(HR_rcs,"~/Desktop/BCMC_1_reslut/con/HR_rcs.csv")
 end.rcode-->
-~~~~~~~~
+~~~~~~~~~~~~~
+
+~~~~~~~~~~~~~
+<!--begin.rcode
+#5. beta estimation of BCMC
+###estimate dynamic hazard ratios (HRs) in a multi-state Markov modeling framework, 
+###which was integrated into a Bayesian regularized Cox survival model.
+beta_of_bcmc<-function(data_sur,M,K){
+library(job)
+library(rjags)
+library(coda)
+library(R2jags)
+library(lattice)
+library(MCMCvis)
+a<-c(0)
+d<-c(1:K)
+for(j in 2:K){
+a[j] <- (d[j-1] + d[j])/2
+}
+a[j+1] <- d[j] + (d[j] - d[j-1])/2
+
+cl <- makeCluster(8) 
+registerDoParallel(cl)
+beta_post_all<-foreach(m = 1:M,
+               .combine = cbind,
+              .packages = c("R2jags","coda","lattice","MCMCvis"),
+               .errorhandling = "pass") %dopar% {
+ sur_y<-data_sur$y[which(data_sur$m==m)]
+ sur_sigema<-data_sur$sigema[which(data_sur$m==m)]
+ sur_X<-data_sur$X[which(data_sur$m==m)]
+ row<-length(sur_y)
+ H<-matrix(NA,row,K)
+ N<-matrix(NA,row,K)
+ for(kk in 1:K){
+ for(i in 1:row){
+h0<- ifelse(sur_y[i]< a[kk],0,1)
+H[i,kk]<- h0*(min(sur_y[i],a[kk+1])-a[kk])
+aa<-ifelse(sur_y[i] > a[kk+1],0,1)
+delta<-sur_sigema[i]
+N[i,kk]<-h0*aa*delta
+}
+ }
+beta1<-rep(0,K)
+lam1<-rep(0,K)
+f1<-rep(0,K)
+e1<-rep(0,K)
+sigma_beta_sq<-c()
+
+model_string <- textConnection("
+  model{
+# Likelihood Construction
+for(i in 1:row){
+for(kk in 1:K){
+N[i,kk]~ dpois(exp(beta1[kk]*(sur_X[i]))*H[i,kk]*lam1[kk])
+}}
+
+  # Prior for lambdas
+lamm <- 10000*(0.01) # exp(-a[2]*0.01) = 0.995
+lam1[1] ~ dgamma(lamm,10000)
 
 
+lamstar <- 0.05# Select value or set prior for lamstar
+w<-0.01
+for(kk in 2:K){ # prior on baseline hazard bits
+f1[kk] <- w*(a[kk+1]-a[kk])
+e1[kk] <- lamstar*f1[kk]
+lam1[kk]~dgamma(e1[kk],f1[kk])
+}
+
+
+# Inferences for the HRs and prior on the betas
+# relative hazard
+  e2 <- 0.001
+  f2 <- 0.0005
+  v1 <- 1000
+  
+  # 1. β₁ ~ N(0, v₁²)
+  beta1[1] ~ dnorm(0, 1/(v1*v1))
+  
+  # 2. σ_β² ~ InverseGamma(e₂, f₂)
+  sigma_beta_sq ~ dgamma(e2, f2)
+  
+  # 3. j=2,...,K: (β_j - β_{j-1}) ~ N(0, σ_β²)
+  for(kk in 2:K) {
+    beta1[kk] ~ dnorm(beta1[kk-1], 1/(0.1*sigma_beta_sq))
+  }
+}")
+
+data_list <- list(row=row,sur_X=sur_X,N=N,H=H,K=K,a=a)
+set.seed(123)  
+beta_init <- numeric(K)
+beta_init[1] <- rnorm(1, 0, 0.1) 
+for(kk in 2:K) {
+  beta_init[kk] <- beta_init[kk-1] + rnorm(1, 0, 0.1) 
+}
+
+sigma_beta_sq_init <- 0.1  
+
+inits <- list(
+  beta1 = beta_init,
+  lam1 = rep(0.1, K),
+  sigma_beta_sq = sigma_beta_sq_init
+)
+
+model <- jags.model(model_string,data = data_list, inits=inits, n.chains=2,n.adapt=1000)
+#Bayesian Estimation
+params <- c("beta1","lam1")#,"lam","S.pos","S.neg","S.diff") 
+sample <- coda.samples(model,variable.names=params,n.iter=5000, progress.bar="none")#
+#Summarize the output
+sum<-summary(sample)
+outcome<-as.data.frame(cbind(mean=sum[["statistics"]][,1],lwr=sum[["quantiles"]][,1],upr=sum[["quantiles"]][,5]))#差别不大
+return(outcome)
+ }
+stopCluster(cl)
+return(beta_post_all)
+}
+
+bcmc<-beta_of_bcmc(data_sur,M,K)
+write.csv(bcmc,"~/Desktop/BCMC_1_reslut/con/bcmc.csv")#_con,_var,_norm
+end.rcode-->
+~~~~~~~~~~~~~
 
 
 
