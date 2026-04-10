@@ -1,7 +1,6 @@
 <!--begin.rcode
 #5. beta estimation of BCMC
-###estimate dynamic hazard ratios (HRs) in a multi-state Markov modeling framework, 
-###which was integrated into a Bayesian regularized Cox survival model.
+###Estimate dynamic hazard ratios (HRs) in a multi-state Markov modeling framework, 
 beta_of_bcmc<-function(data_sur,M,K){
 library(job)
 library(rjags)
@@ -17,14 +16,13 @@ a[j] <- (d[j-1] + d[j])/2
 a[j+1] <- d[j] + (d[j] - d[j-1])/2
 
 cl <- makeCluster(8) 
-registerDoParallel(cl)
 beta_post_all<-foreach(m = 1:M,
                .combine = cbind,
-              .packages = c("R2jags","coda","lattice","MCMCvis"),
+              .packages = c("R2jags","coda","MCMCvis"),
                .errorhandling = "pass") %dopar% {
  sur_y<-data_sur$y[which(data_sur$m==m)]
  sur_sigema<-data_sur$sigema[which(data_sur$m==m)]
- sur_X<-data_sur$X[which(data_sur$m==m)]
+ sur_X<-data_sur$X[,which(data_sur$m==m)]
  row<-length(sur_y)
  H<-matrix(NA,row,K)
  N<-matrix(NA,row,K)
@@ -48,7 +46,7 @@ model_string <- textConnection("
 # Likelihood Construction
 for(i in 1:row){
 for(kk in 1:K){
-N[i,kk]~ dpois(exp(beta1[kk]*(sur_X[i]))*H[i,kk]*lam1[kk])
+N[i,kk]~dpois(exp(beta1[kk]*(sur_X[i]))*H[i,kk]*lam1[kk])
 }}
 
   # Prior for lambdas
@@ -79,11 +77,12 @@ lam1[kk]~dgamma(e1[kk],f1[kk])
   
   # 3. j=2,...,K: (β_j - β_{j-1}) ~ N(0, σ_β²)
   for(kk in 2:K) {
+    beta1[kk] ~ dnorm(0,0.000001)
     beta1[kk] ~ dnorm(beta1[kk-1], 1/(0.1*sigma_beta_sq))
   }
 }")
 
-data_list <- list(row=row,sur_X=sur_X,N=N,H=H,K=K,a=a)
+data_list <- list(sur_X=sur_X,N=N,H=H,K=K,a=a)
 set.seed(123)  
 beta_init <- numeric(K)
 beta_init[1] <- rnorm(1, 0, 0.1) 
