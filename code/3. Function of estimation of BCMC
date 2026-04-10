@@ -112,7 +112,9 @@ stopCluster(cl)
 return(beta_post_all)
 }
 
-bcmc<-beta_of_bcmc(data_sur,M,K)
+post_estimate<-beta_of_bcmc(data_sur,M,K)
+bcmc<-post_estimate[1:K,]
+lam<-post_estimate[-c(1:K),]
 write.csv(bcmc,"~/Desktop/BCMC_1_reslut/con/bcmc.csv")#_con,_var,_norm
 end.rcode-->
 
