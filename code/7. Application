@@ -1,0 +1,158 @@
+<!--begin.rcode
+library(readr)
+library(haven)
+library(dplyr)
+Hor_hrs <- read_dta("~/Desktop/H_HRS_d_stata/H_HRS_d.dta")
+dim(Hor_hrs)
+randhrs1992_2020v1 <- read_dta("~/Desktop/H_HRS_d_stata/randhrs1992_2020v1.dta")
+dim(randhrs1992_2020v1)
+library(dplyr)
+which(colnames(randhrs1992_2020v1)==paste0("r",13,"bwc20"))
+colnames(randhrs1992_2020v1)[5309:5339]
+which(colnames(randhrs1992_2020v1)==paste0("r",13,"hearing"))
+m<-randhrs1992_2020v1[,which(colnames(randhrs1992_2020v1)==paste0("r",3,"imrc"))]
+for (i in 3:13){
+  m<-cbind(m,randhrs1992_2020v1[,which(colnames(randhrs1992_2020v1)==paste0("r",i,"imrc"))])
+}
+
+for (i in 3:13){
+  m<-cbind(m,randhrs1992_2020v1[,which(colnames(randhrs1992_2020v1)==paste0("r",i,"dlrc"))])
+}
+      
+for (i in 3:13){
+  m<-cbind(m,randhrs1992_2020v1[,which(colnames(randhrs1992_2020v1)==paste0("r",i,"ser7"))])
+}
+
+for (i in 3:13){
+m<-cbind(m,randhrs1992_2020v1[,which(colnames(randhrs1992_2020v1)==paste0("r",i,"bwc20"))])
+}
+for (i in 3:13){
+m<-cbind(m,Hor_hrs[,which(colnames(Hor_hrs)==paste0("r",i,"hearing"))])
+}
+for (i in 3:13){
+m<-cbind(m,Hor_hrs[,which(colnames(Hor_hrs)==paste0("r",i,"sight"))])
+}
+summary(m)
+mental<-m[,-1]
+ID <- randhrs1992_2020v1[,c('hhidpn')]
+cog<-cbind(ID,mental)
+
+#State of cog
+colnames(cog)
+for (i in 1:11){
+  cog[,67+i]<-cog[,2+i-1]+cog[,13+i-1]+cog[,24+i-1]+cog[,35+i-1]
+}
+score<-cog[,c(1,68:78,46:67)]
+f<-score[complete.cases(score),]
+dim(f)
+dat_hrs<-f[,1:12]
+cor<-f[,13:34]
+
+#cor[,12]<-apply(cor[,1:11],1,function(x){if(all(x==0)==TRUE){
+#  return(0)
+#} else if(all(x==1)==TRUE) {
+#  return(1)
+#} else {
+#  return(2)
+#}})
+colnames(dat_hrs)
+for(i in 1:11){
+  dat_hrs[which(dat_hrs[,i+1]<=6),12+i]<-3
+  dat_hrs[which(dat_hrs[,i+1]>6&dat_hrs[,i+1]<=11),12+i]<-2
+  dat_hrs[which(dat_hrs[,i+1]>11&dat_hrs[,i+1]<=27),12+i]<-1
+}
+for(i in 1:22){
+  cor[,22+i]<-cut(cor[,i],c(0,3,Inf),c(0,1))
+}
+#定义是否为both impairment
+for(i in 1:11){
+  cor[which(cor[,22+i]==1&cor[,33+i]==1),44+i]<-1
+  cor[which(cor[,22+i]==0|cor[,33+i]==0),44+i]<-0
+}
+
+colnames(cor)
+summary(cor)
+table(cor$V53)
+cor<-cor[,c(23:55)]#3-13wave hearing,3-13wave eyesight,3-13both impairment
+hrs_dat_original<-cbind(dat_hrs,cor)
+write.csv(hrs_dat_original,"~/Desktop/BCMC_result/hrs/hrs_dat_original.csv")
+
+dat_hrs<-hrs_dat_original
+install.packages("expm")
+library(expm)
+install.packages("expm", type = "binary")
+p_list_s<- c(rep(0, 3*3*10))
+dim(p_list_s)<-c(3,3,10)
+dat<-dat_hrs[,13:23]
+for (i in 1:10){
+  p <- matrix(0, nrow = 3, ncol = 3)  
+  col_names <-c("NCI","MCI","DEM")
+  row_names <- c("NCI","MCI","DEM")
+  num<-length(which(dat[,i]==1))
+  p[1,1]<-length(which(dat[,i]==1&dat[,i+1]==1))/num
+  p[1,2]<-length(which(dat[,i]==1&dat[,i+1]==2))/num
+  p[1,3]<-length(which(dat[,i]==1&dat[,i+1]==3))/num
+  num2<-length(which(dat[,i]==2))
+  p[2,1]<-length(which(dat[,i]==2&dat[,i+1]==1))/num
+  p[2,2]<-length(which(dat[,i]==2&dat[,i+1]==2))/num
+  p[2,3]<-length(which(dat[,i]==2&dat[,i+1]==3))/num
+  p[3,1]<-0
+  p[3,2]<-0
+  p[3,3]<-1
+  p_list_s[,,i]<-p
+}
+k<-40
+p_list_s_ste<- c(rep(0, 3*3*k))
+dim(p_list_s_ste)<-c(3,3,k)
+for(i in 1:10){
+  p_list_s_ste[,,((i-1)*4+1):((i-1)*4+4)]<-abs((sqrtm(sqrtm(p_list_s[,,i]))))
+}
+p_list_s_ste
+
+
+k<-40
+plot(1:k, p_list_s_ste[1,2,1:k], type="l", col="steelblue2", ylim=c(0,0.1), xlab="Wave", ylab="P", main="Probability",bty = "l")
+lines(1:k, p_list_s_ste[2,1,1:k], type="l", col="purple")
+lines(1:k, p_list_s_ste[1,3,1:k], type="l", col="palegreen3")
+lines(1:k, p_list_s_ste[2,3,1:k], type="l", col="gold1")
+legend("topright", legend=c("NCI-CIND", "CIND-NCI","NCI-Dementia","CIND-Dementia"), col=c("steelblue2", "purple", "palegreen3", "gold1"), lty=1, cex=0.8, bty = "n")
+
+library(foreach)
+library(iterators)
+library(parallel)
+library(doParallel)
+states<- 3  # number of states
+n<-dim(dat)[1] # The number of samples 
+cl <- makeCluster(7) 
+registerDoParallel(cl)
+#1. Repeat the cycle to generate sample data _ control group
+data_1<-foreach(i = 1:n,
+               .combine = rbind,
+               .errorhandling = "pass") %dopar% {
+  current_state <- dat$V13[i]
+  da<-c(current_state)
+  # Store sample sequences
+  for(t in 1:k){
+    set.seed(123)
+    next_state <- sample(1:states, 1, prob = p_list_s_ste[current_state,,t])
+  da<- c(da,next_state)
+  current_state<-next_state
+  }
+  return(da)
+               }
+stopCluster(cl)
+wide_data_1<- as.data.frame(data_1)
+colnames(wide_data_1)<-c(1:(k+1))
+write.csv(wide_data_1,"~/Desktop/BCMC_result/hrs/wide_data.csv")
+
+#3. Extracted  survival time data
+x_list <- list()
+  x_list[[1]] <-dat_hrs[,c(46:56)]
+n # The number of samples
+q<-1
+C1<-data_sur_extract(wide_data_1,x_list,q)
+# m=1 表示pfs-pd
+C_2<-C1[which((C1$m==1)|(C1$m==5)),]
+C_2[which(m==5),3]<-2
+write.csv(C_2,"~/Desktop/BCMC_result/hrs/data_sur.csv")
+end.rcode-->
