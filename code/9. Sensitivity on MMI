@@ -1,0 +1,453 @@
+<!--begin.rcode
+# ============================================================================
+# Simulation of Multi-State Processes with Controlled Markov Deviation
+# Based on Method S2: BIC-based Markov Memory Index (MMI)
+# ============================================================================
+
+library(tidyr)
+
+# ----------------------------------------------------------------------------
+# 1. Parameter Settings (from existing code)
+# ----------------------------------------------------------------------------
+
+K <- 260                    # number of time points
+interval <- 1
+tp <- seq(0, interval * K, interval)
+M <- 4                      # number of transition paths
+n_patients <- 50          # sample size
+q <- 1                      # number of covariates
+set.seed(123)
+
+# State space
+states_all <- c("PFS", "PD", "Death")
+
+# ----------------------------------------------------------------------------
+# 2. True beta trajectories (U-shaped, from existing code)
+# ----------------------------------------------------------------------------
+
+beta <- matrix(0, nrow = M, ncol = K)
+for(t in 1:K) {
+  x <- t
+  si <- 60
+  mu <- 130
+  beta[1, t] <- (-1) * 40 * si^(-1) * exp((-(x - 130)^2) / (2 * si^2))
+  beta[2, t] <- 45 * si^(-1) * exp((-(x - 130)^2) / (2 * si^2))
+  beta[3, t] <- (-1) * 40 * si^(-1) * exp((-(x - 130)^2) / (2 * si^2))
+  beta[4, t] <- (-1) * 40 * si^(-1) * exp((-(x - 130)^2) / (2 * si^2))
+}
+
+# ----------------------------------------------------------------------------
+# 3. Baseline hazard parameters (Weibull)
+# ----------------------------------------------------------------------------
+
+lambda_pfs <- 0.001
+kappa_pfs <- 1.2
+lambda_pd <- 0.01
+kappa_pd <- 0.9
+lambda_pfs_d <- 0.0002
+kappa_pfs_d <- 1.0
+lambda_pd_d <- 0.002
+kappa_pd_d <- 1.0
+
+# Transition path definitions: list(origin, destination, kappa, lambda, beta_row_index)
+params <- list(
+  c("PFS", "PD", kappa_pfs, lambda_pfs, 1),      # m = 1: PFS -> PD
+  c("PD", "PFS", kappa_pd, lambda_pd, 2),        # m = 2: PD -> PFS
+  c("PFS", "Death", kappa_pfs_d, lambda_pfs_d, 3), # m = 3: PFS -> Death
+  c("PD", "Death", kappa_pd_d, lambda_pd_d, 4)   # m = 4: PD -> Death
+)
+
+# ----------------------------------------------------------------------------
+# 4. Covariate setup
+# ----------------------------------------------------------------------------
+
+x_list <- list()
+x_list[[1]] <- matrix(1, nrow = n_patients, ncol = K)
+x_list[[1]][1:(n_patients/2), ] <- 0
+names(x_list) <- c("Covariate1")
+
+beta_list <- list()
+beta_list[[1]] <- beta
+names(beta_list) <- c("Covariate1")
+
+# ----------------------------------------------------------------------------
+# 5. Core simulation functions (modified to support higher-order Markov)
+# ----------------------------------------------------------------------------
+
+#' Sample transition time from Weibull hazard with covariate effects
+#' 
+#' @param kappa Weibull shape parameter
+#' @param lambda Weibull scale parameter  
+#' @param beta_row_index Row index in beta matrix (1..4)
+#' @param patient_id Patient index
+#' @param entry_time Time entering current state
+#' @param tmax Maximum follow-up time
+#' @param q Number of covariates
+#' @param beta_list List of beta matrices
+#' @param x_list List of covariate matrices
+#' @param lag_idx Lag index for higher-order model (1 = current state)
+#' @param hist_states Historical states for higher-order dependence (vector of length psi)
+#' @param state_mapping Named vector for state to numeric conversion
+sample_tran_time <- function(kappa, lambda, beta_row_index, patient_id, entry_time, 
+                             tmax, q, beta_list, x_list, 
+                             lag_idx = 1, hist_states = NULL, state_mapping = NULL) {
+  
+  U <- runif(1)
+  if (U <= 0) return(Inf)
+  if (U >= 1) return(entry_time)
+  
+  entry_time_int <- ceiling(entry_time)
+  if (entry_time_int < entry_time) entry_time_int <- entry_time_int + 1
+  
+  max_search_time <- min(tmax, entry_time_int + 1000)
+  
+  for (t in entry_time_int:max_search_time) {
+    cumulative_hazard <- 0
+    
+    for (s in entry_time_int:t) {
+      s_state <- s - entry_time
+      if (s_state <= 0) next
+      
+      # Baseline hazard: h0(t) = lambda * kappa * t^(kappa-1)
+      h0 <- lambda * kappa * (s_state)^(kappa - 1)
+      
+      # Covariate effect
+      time_idx <- min(max(1, s - entry_time_int + 1), K)
+      eta <- 0
+      for (j in 1:q) {
+        x_j <- x_list[[j]][patient_id, time_idx]
+        beta_j <- beta_list[[j]][beta_row_index, time_idx]
+        eta <- eta + x_j * beta_j
+      }
+      
+      cumulative_hazard <- cumulative_hazard + h0 * exp(eta)
+    }
+    
+    if (exp(-cumulative_hazard) < U) {
+      return(t)
+    }
+  }
+  
+  return(max_search_time)
+}
+
+#' Simulate one patient trajectory with higher-order Markov dependence
+#' 
+#' @param patient_id Patient index
+#' @param params Transition path parameters
+#' @param tmax Maximum follow-up time
+#' @param start_state Initial state
+#' @param psi Order of Markov chain (MMI target)
+#' @param phi Weight vector for each lag (length = psi, sum to 1)
+sim_one_patient_ho <- function(patient_id, params, tmax = K, start_state, 
+                               psi = 1, phi = NULL) {
+  
+  # Default: first-order Markov (phi_1 = 1)
+  if (is.null(phi)) {
+    phi <- rep(0, psi)
+    phi[1] <- 1
+  }
+  if (length(phi) != psi) {
+    stop("Length of phi must equal psi")
+  }
+  if (abs(sum(phi) - 1) > 1e-10) {
+    stop("phi must sum to 1")
+  }
+  
+  # State mapping for numerical encoding
+  state_map <- c("PFS" = 1, "PD" = 2, "Death" = 3)
+  state_names <- c("PFS", "PD", "Death")
+  
+  # Initialize trajectory
+  current_state <- start_state
+  entry_time <- 0
+  traj <- data.frame(time = entry_time, state = current_state, event = "Enter")
+  
+  # Store history of states (for higher-order dependence)
+  state_history <- c(current_state)  # most recent first
+  
+  while (current_state != "Death" & entry_time < tmax) {
+    # Find possible transitions from current state
+    possible_trans <- Filter(function(x) x[1] == current_state, params)
+    if (length(possible_trans) == 0) break
+    
+    # For each possible transition, compute weighted hazard across lags
+    trans_times <- numeric(length(possible_trans))
+    
+    for (j in 1:length(possible_trans)) {
+      trans <- possible_trans[[j]]
+      kappa <- as.numeric(trans[3])
+      lambda <- as.numeric(trans[4])
+      beta_row_index <- as.numeric(trans[5])
+      
+      # Weighted sampling across lags (higher-order Markov)
+      # For each lag l, sample a potential transition time
+      lag_times <- numeric(psi)
+      lag_weights <- numeric(psi)
+      
+      for (l in 1:psi) {
+        # Determine the state at lag l
+        # state_history[1] = current state (lag 1)
+        # state_history[l] = state at lag l
+        if (l <= length(state_history)) {
+          lag_state <- state_history[l]
+        } else {
+          # If history insufficient, use current state
+          lag_state <- current_state
+        }
+        
+        # Sample transition time using the state at lag l as the "current" state
+        # Note: The hazard is evaluated from the lag state, but the clock starts 
+        # from the actual entry_time into the current state.
+        # For simplicity, we use the same entry_time but the hazard is evaluated
+        # as if the process were in the lag state.
+        # A more rigorous approach would track entry times per state.
+        # Here we approximate by using the same entry_time.
+        
+        t_sample <- sample_tran_time(
+          kappa = kappa, 
+          lambda = lambda, 
+          beta_row_index = beta_row_index, 
+          patient_id = patient_id, 
+          entry_time = entry_time, 
+          tmax = tmax, 
+          q = q, 
+          beta_list = beta_list, 
+          x_list = x_list,
+          lag_idx = l,
+          hist_states = state_history[1:min(l, length(state_history))],
+          state_mapping = state_map
+        )
+        
+        lag_times[l] <- t_sample
+        lag_weights[l] <- phi[l]
+      }
+      
+      # Weighted average of transition times (using harmonic mean or min)
+      # Following Method S2: the transition intensity is the weighted average
+      # of lag-specific intensities. We approximate by taking the weighted 
+      # minimum of the sampled times (earliest event across lags).
+      # A more exact approach would use competing risks with weighted hazards.
+      trans_times[j] <- weighted.mean(lag_times, w = lag_weights)
+    }
+    
+    # Find the earliest transition
+    next_time <- min(trans_times)
+    if (next_time >= tmax) break
+    
+    idx <- which.min(trans_times)
+    next_state <- possible_trans[[idx]][2]
+    
+    traj <- rbind(traj,
+                  data.frame(time = next_time, 
+                             state = next_state, 
+                             event = "Transfer"))
+    
+    # Update history: prepend new state (most recent first)
+    state_history <- c(next_state, state_history)
+    # Keep only psi most recent states
+    if (length(state_history) > psi) {
+      state_history <- state_history[1:psi]
+    }
+    
+    current_state <- next_state
+    entry_time <- next_time
+    
+    if (nrow(traj) > 30) break
+  }
+  
+  # Censoring
+  if (current_state != "Death" & entry_time < tmax) {
+    traj <- rbind(traj,
+                  data.frame(time = tmax,
+                             state = current_state,
+                             event = "Censored"))
+  }
+  
+  return(traj)
+}
+
+#' Convert continuous trajectory to discrete-time state chain
+sur_traj <- function(traj, tp) {
+  states <- rep(NA, length(tp))
+  for (i in 1:length(tp)) {
+    t <- tp[i]
+    idx <- which(traj$time <= t)
+    if (length(idx) > 0) {
+      states[i] <- traj$state[max(idx)]
+    }
+  }
+  return(states)
+}
+
+# ----------------------------------------------------------------------------
+# 6. Main simulation function for a given MMI
+# ----------------------------------------------------------------------------
+
+#' Simulate data for a given MMI target
+#' 
+#' @param psi Target MMI (1, 2, 3, or 4)
+#' @param phi Weight vector for each lag (length = psi)
+#' @param n_patients Number of patients
+#' @param K Number of time points
+#' @param tp Time points
+#' @param params Transition parameters
+#' @param prob_start Probability of starting in PFS vs PD
+#' @param seed Random seed
+#' @return A data frame with n_patients rows and (K+1) columns:
+#'         Column 1: initial state, Columns 2:(K+1): states at each time point
+simulate_mmi_scenario <- function(psi, phi, n_patients = 50, K = 260, 
+                                  tp = seq(0, K, 1), params, 
+                                  prob_start = c(2/3, 1/3), seed = 123) {
+  
+  set.seed(seed)
+  
+  cat("Simulating MMI =", psi, "with phi =", paste(round(phi, 3), collapse = ", "), "\n")
+  start_time <- Sys.time()
+  
+  discrete_chains <- list()
+  pb <- txtProgressBar(min = 0, max = n_patients, style = 3)
+  
+  for (i in 1:n_patients) {
+    # Sample initial state
+    start_state <- sample(c("PFS", "PD"), 1, prob = prob_start)
+    
+    # Simulate trajectory with higher-order dependence
+    cont_traj <- sim_one_patient_ho(
+      patient_id = i, 
+      params = params, 
+      tmax = K, 
+      start_state = start_state,
+      psi = psi,
+      phi = phi
+    )
+    
+    # Convert to discrete time chain
+    states <- sur_traj(cont_traj, tp)
+    
+    # Store as data frame
+    discrete_chains[[i]] <- data.frame(
+      PatientID = i,
+      Time = tp,
+      State = states
+    )
+    
+    setTxtProgressBar(pb, i)
+  }
+  
+  close(pb)
+  
+  end_time <- Sys.time()
+  cat("\nCompleted in", round(end_time - start_time, 2), "seconds\n")
+  
+  # Convert to wide format: n rows, (K+1) columns
+  # Column 1: initial state, Columns 2:(K+1): states at t=0,1,...,K
+  wide_data <- do.call(rbind, lapply(discrete_chains, function(df) {
+    # Convert states to numeric: PFS=1, PD=2, Death=3
+    state_num <- as.numeric(factor(df$State, 
+                                   levels = c("PFS", "PD", "Death"),
+                                   labels = c(1, 2, 3)))
+    # Row: initial state + states at all time points
+    row_vec <- c(state_num[1], state_num)  # first element = initial state
+    names(row_vec) <- c("init_state", paste0("t_", tp))
+    return(row_vec)
+  }))
+  
+  wide_data <- as.data.frame(wide_data)
+  
+  return(wide_data)
+}
+
+# ----------------------------------------------------------------------------
+# 7. Define weight configurations for each MMI (from Method S2)
+# ----------------------------------------------------------------------------
+
+# MMI = 1: First-order Markov (no deviation)
+phi_mmi1 <- c(1.0)
+
+# MMI = 2: Mild deviation
+phi_mmi2_weak <- c(0.85, 0.15)
+phi_mmi2_mod <- c(0.80, 0.20)
+# phi_mmi2_strong <- c(0.70, 0.30)  # optional
+
+# MMI = 3: Moderate deviation
+phi_mmi3_weak <- c(0.70, 0.20, 0.10)
+phi_mmi3_mod <- c(0.60, 0.25, 0.15)
+# phi_mmi3_strong <- c(0.50, 0.30, 0.20)  # optional
+
+# MMI = 4: Strong deviation
+phi_mmi4_weak <- c(0.60, 0.20, 0.12, 0.08)
+phi_mmi4_mod <- c(0.50, 0.25, 0.15, 0.10)
+# phi_mmi4_strong <- c(0.40, 0.30, 0.20, 0.10)  # optional
+
+# ----------------------------------------------------------------------------
+# 8. Generate datasets for each MMI scenario
+# ----------------------------------------------------------------------------
+
+# MMI = 1
+data_mmi1 <- simulate_mmi_scenario(
+  psi = 1, 
+  phi = phi_mmi1, 
+  n_patients = n_patients, 
+  K = K, 
+  tp = tp, 
+  params = params,
+  seed = 123
+)
+
+# MMI = 2 (mild deviation)
+data_mmi2 <- simulate_mmi_scenario(
+  psi = 2, 
+  phi = phi_mmi2_weak, 
+  n_patients = n_patients, 
+  K = K, 
+  tp = tp, 
+  params = params,
+  seed = 456
+)
+
+# MMI = 3 (moderate deviation)
+data_mmi3 <- simulate_mmi_scenario(
+  psi = 3, 
+  phi = phi_mmi3_weak, 
+  n_patients = n_patients, 
+  K = K, 
+  tp = tp, 
+  params = params,
+  seed = 789
+)
+
+# MMI = 4 (strong deviation)
+data_mmi4 <- simulate_mmi_scenario(
+  psi = 4, 
+  phi = phi_mmi4_weak, 
+  n_patients = n_patients, 
+  K = K, 
+  tp = tp, 
+  params = params,
+  seed = 101
+)
+
+# ----------------------------------------------------------------------------
+# 9. Output summary
+# ----------------------------------------------------------------------------
+
+cat("\n========================================\n")
+cat("Summary of generated datasets\n")
+cat("========================================\n")
+
+summary_stats <- function(data, name) {
+  cat("\n", name, ":\n", sep = "")
+  cat("  Dimensions:", nrow(data), "rows x", ncol(data), "columns\n")
+  cat("  Column 1 (init_state):", paste(unique(data[,1]), collapse = ", "), "\n")
+  # Count deaths at final time
+  final_col <- ncol(data)
+  death_count <- sum(data[, final_col] == 3, na.rm = TRUE)
+  cat("  Deaths at final time (t=K):", death_count, 
+      "(", round(death_count/nrow(data)*100, 1), "%)\n")
+}
+
+summary_stats(data_mmi1, "MMI = 1")
+summary_stats(data_mmi2, "MMI = 2")
+summary_stats(data_mmi3, "MMI = 3")
+summary_stats(data_mmi4, "MMI = 4")
