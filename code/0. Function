@@ -1,0 +1,603 @@
+<!--begin.rcode
+#1. sampling time from weibull (considering covariate effects)
+  sample_tran_time <- function(kappa, lambda, beta_row_index, patient_id, entry_time, tmax, q) {
+    # Generate uniform random number
+    U <- runif(1)
+    if (U <= 0) return(Inf)
+    if (U >= 1) return(entry_time)
+    
+    entry_time_int <- ceiling(entry_time)
+    if (entry_time_int < entry_time) entry_time_int <- entry_time_int + 1
+    
+    max_search_time <- min(tmax, entry_time_int + 1000)
+    
+    for (t in entry_time_int:max_search_time) {
+      cumulative_hazard <- 0
+      
+     
+      for (s in entry_time_int:t) {
+       
+        s_state <- s - entry_time
+        if (s_state <= 0) next
+        
+        #  h0(t) = lambda * kappa * t^(kappa-1)
+        h0 <- lambda * kappa * (s_state)^(kappa - 1)
+        
+        # 
+        time_idx <- min(max(1, s - entry_time_int + 1), K)
+        eta <- 0
+        for (j in 1:q) {
+          x_j <- x_list[[j]][patient_id, time_idx]
+          beta_j <- beta_list[[j]][beta_row_index, time_idx]
+          eta <- eta + x_j * beta_j
+        }
+        
+        # 
+        cumulative_hazard <- cumulative_hazard + h0 * exp(eta)
+      }
+      
+      # 
+      if (exp(-cumulative_hazard) < U) {
+        return(t)
+      }
+    }
+    
+    return(max_search_time)
+  }
+  
+#2.Simulate the complete trajectory of a single patient
+  sim_one_patient <- function(patient_id, params, tmax = K, start_state) {
+    current_state <- start_state
+    entry_time <- 0
+    traj <- data.frame(time = entry_time, state = current_state, event = "Enter")
+    
+    while (current_state != "Death" & entry_time < tmax) {
+      # 
+      possible_trans <- Filter(function(x) x[1] == current_state, params)
+      if (length(possible_trans) == 0) break
+      
+      times <- numeric(length(possible_trans))
+      
+      for (j in 1:length(possible_trans)) {
+        trans <- possible_trans[[j]]
+        kappa <- as.numeric(trans[3])
+        lambda <- as.numeric(trans[4])
+        beta_row_index <- as.numeric(trans[5]) # m=1,2,3,4
+        
+        t_sample <- sample_tran_time(kappa, lambda,  beta_row_index, patient_id, entry_time, tmax, q)
+        times[j] <- t_sample
+      }
+      
+      # 
+      next_time <- min(times)
+      if (next_time >= tmax) break
+      
+      idx <- which.min(times)
+      next_state <- possible_trans[[idx]][2]
+      
+      traj <- rbind(traj,
+                    data.frame(time = next_time, 
+                               state = next_state, 
+                               event = "Transfer"))
+      
+      current_state <- next_state
+      entry_time <- next_time
+      
+      # 
+      if (nrow(traj) > 30) break
+    }
+    
+    if (current_state != "Death" & entry_time < tmax) {
+      traj <- rbind(traj,
+                    data.frame(time = tmax,
+                               state = current_state,
+                               event = "Censored"))
+    }
+    
+    return(traj)
+  }
+  
+#3. Convert continuous trajectories into discrete-time state chains
+  sur_traj <- function(traj, tp) {
+    states <- rep(NA, length(tp))
+    for (i in 1:length(tp)) {
+      t <- tp[i]
+      # 
+      idx <- which(traj$time <= t)
+      if (length(idx) > 0) {
+        states[i] <- traj$state[max(idx)]
+      }
+    }
+    return(states)
+  }
+#4. Extracted  survival time data
+  data_sur_extract<-function(wide_data,x_list,q){
+    library(foreach)
+    library(iterators)
+    library(parallel)
+    library(doParallel)
+    library(data.table)
+    n.cores<-detectCores()
+    cl <- makeCluster(10) 
+    registerDoParallel(cl)
+    C0<-c()
+    #generate chain data
+    data<-wide_data
+    num<-dim(data)[1]
+    k0<-dim(data)[2]
+    C0<-foreach(i = 1:num,
+                .combine = rbind,
+                .packages = c("dplyr"),
+                .errorhandling = "pass") %dopar% {
+                  #generate chain data    
+                  c<-c(0)
+                  Time<-c(rep(1, k0))
+                  s<-c(rep(0, k0))
+                  d<-as.numeric(data[i,])
+                  sit<-min(which(is.na(d)==FALSE))#if have NA
+                  for(t in sit:(k0-1)){
+                    Time[t+1]<-ifelse(d[t]==d[t+1],Time[t]+1,1)
+                    if ((d[t]==1)&(d[t+1]==2)) {s[t]<-1}
+                    else if ((d[t]==2)&(d[t+1]==1)) {s[t]<-2}
+                    else if ((d[t]==1)&(d[t+1]==3)) {s[t]<-3} 
+                    else if ((d[t]==2)&(d[t+1]==3)) {s[t]<-4}
+                    else s[t]<-0
+                  }
+                  Time<-Time[sit:k0]
+                  s<-s[sit:k0]
+                  #covariants information
+                  X<-NA
+                  for(qq in 1:q){
+                    X<-rbind(X,x_list[[qq]][i,])}
+                  X<-as.data.frame(X[,sit:(k0-1)])
+                  X<-cbind(X[-1,1],X[-1,])
+                  
+                  #(1) transfer has occurred 
+                  if (any(s!= 0)==TRUE) {
+                    for(l in 1:(sum(s!= 0))){
+                      ci<-as.matrix(t(c(ID=i,y=Time[which(s!= 0)][l],m=s[which(s!= 0)][l],sigema=1,K=which(s!= 0)[l],X=X[,which(s!= 0)[l]])))
+                      c<-rbind(c,ci)}
+                  }
+                  #(2) No transfer occurred at the last point in time
+                  if(last(Time)>1){
+                    if(last(d)==1|last(d)==2){#censoring data
+                      ci2<-as.matrix(t(c(ID=i,y=last(Time)-1,m=last(d),sigema=0,K=k0-1,X=X[,k0])))
+                      ci3<-as.matrix(t(c(ID=i,y=last(Time)-1,m=last(d)+2,sigema=0,K=k0-1,X=X[,k0])))
+                      #m=1 in the last time correspond the censoring data of m=1/m=3;
+                      #m=2 in the last time correspond the censoring data of m=2/m=4
+                      c<-rbind(c,ci2,ci3)}
+                  }
+                  
+                  #(3) pfs/pd-d
+                  if(last(d)==1|last(d)==2){
+                    ci4<-as.matrix(t(c(ID=i,y=k0-sit,m=5,sigema=0,K=k0-1,X=X[,k0])))
+                    c<-rbind(c,ci4)}
+                  if(last(d)==3){ 
+                    if(d[sit]==1|d[sit]==2){
+                      ci5<-as.matrix(t(c(ID=i,y=min(which(d==3))-sit,m=5,sigema=1,K=min(which(d==3)),X=X[,min(which(d==3))])))
+                      c<-rbind(c,ci5) }
+                    if(d[sit]==3){c<-c}}
+                  
+                  c<-c[-1,]
+                  return(c)
+                }
+    
+    stopCluster(cl)
+    C1<-as.data.frame(C0)
+    return(C1)
+  }
+#5. beta estimation of Fre-Cox,TVC-Cox, RCS-Cox
+  beta_of_HR_cox<-function(data_sur,M){
+    library(survival)
+    HR_cox<-matrix(0,M,3)
+    for(m in c(1:M)){
+      data0<-data_sur[which(data_sur$m==m),]
+      data<-list(y=data0$y,group=data0$X,delta=data0$sigema)
+      res.cox <- coxph(Surv(y, delta) ~ group, data = data)
+      sum<-summary(res.cox)
+      HR_cox[m,]<-cbind(sum$coefficients[2],sum$conf.int[3],sum$conf.int[4])
+    }
+    colnames(HR_cox)<-c("HR","low","upr")
+    return(HR_cox)
+  }
+  beta_of_HR_TV<-function(data_sur,M,K){
+    library(survival)
+    library(survminer)
+    time_parallel <- system.time({
+      
+      HR_TV<-data.frame(rep(0,K))
+      for(m in c(1:M)){
+        HR_TV_all<-matrix(0,K,3)
+        int<-1:K
+        data0<-data_sur[which(data_sur$m==m),]
+        data<-list(y=data0$y,group=data0$X,delta=data0$sigema)
+        fit<- coxph(Surv(y, delta) ~ group+tt(group), data = data,tt =function(x,int,...) x * log(int))
+        sum<-summary(fit)
+        HR_TV_all[,1]<-exp(sum$coefficients[1,1]+sum$coefficients[2,1]*log(int))
+        HR_TV_all[,2]<-exp(log(sum$conf.int[1,3])+log(sum$conf.int[2,3])*log(int))
+        HR_TV_all[,3]<-exp(log(sum$conf.int[1,4])+log(sum$conf.int[2,4])*log(int))
+        HR_TV<-cbind(HR_TV,data.frame(HR_TV_all))
+      }
+      HR_TV<-HR_TV[,-1]
+    })  # 结束 system.time
+    
+    HR_TV<-cbind(HR_TV,as.numeric(time_parallel["elapsed"]))
+    return(HR_TV)
+  }
+  beta_of_HR_rcs<-function(data_sur,M,K){
+    library(survival)
+    library(casebase)
+    library(splines)
+    HR_rcs<-data.frame(rep(0,K))
+    fit<-list()
+    time_parallel <- system.time({
+      
+      for(m in 1:M){
+        data0<-data_sur[which(data_sur$m==m),]
+        data<-list(y=data0$y,group=data0$X,delta=data0$sigema,tp=data0$'K')
+        fit[[m]]<-fitSmoothHazard(delta~group*bs(tp,df=3),
+                                  data=data,time="y")
+        if (any(is.na(coef(fit[[m]])))) {
+          fit[[m]] <- fitSmoothHazard(delta ~ group + bs(tp, df=3),
+                                      data = data, time = "y")
+        }
+        newtime=c(1:K)
+        newdata1=data.frame(group=factor("1",levels=c("1","0")),tp=newtime)
+        p1<-plot(fit[[m]],newdata=newdata1,var="group",increment=1,xvar="tp",type="hr",ci=T,ylim=c(0,10))
+        rcs<-data.frame(TVC=p1$hazard_ratio,TVC_lwr=p1$lowerbound,TVC_upr=p1$upperbound)
+        HR_rcs<-cbind(HR_rcs,data.frame(rcs))
+      }
+      HR_rcs<-HR_rcs[,-1]
+    })  # 结束 system.time
+    
+    HR_rcs<-cbind(HR_rcs,as.numeric(time_parallel["elapsed"]))
+    return(HR_rcs)
+  }
+#6. beta estimation of BCMC
+   beta_of_bcmc<-function(data_sur,M,K,s0,lamstar){
+    library(job)
+    library(rjags)
+    library(coda)
+    library(R2jags)
+    library(lattice)
+    library(MCMCvis)
+    library(foreach)
+    library(iterators)
+    library(parallel)
+    library(doParallel)
+    library(data.table)
+    a<-c(0)
+    d<-c(1:K)
+    for(j in 2:K){
+      a[j] <- (d[j-1] + d[j])/2
+    }
+    a[j+1] <- d[j] + (d[j] - d[j-1])/2
+    
+    cl <- makeCluster(10) 
+    registerDoParallel(cl)
+    
+    time_parallel <- system.time({
+      
+      beta_post0<-foreach(m = 1:M,
+                          .packages = c("R2jags","coda","lattice","MCMCvis"),
+                          .errorhandling = "pass") %dopar% {
+                            # colnames(data_sur)
+                            sur_y<-data_sur$y[which(data_sur$m==m)]
+                            sur_sigema<-data_sur$sigema[which(data_sur$m==m)]
+                            sur_X<-data_sur$X[which(data_sur$m==m)]
+                            row<-length(sur_y)
+                            H<-matrix(NA,row,K)
+                            N<-matrix(NA,row,K)
+                            for(kk in 1:K){
+                              for(i in 1:row){
+                                h0<- ifelse(sur_y[i]< a[kk],0,1)
+                                H[i,kk]<- h0*(min(sur_y[i],a[kk+1])-a[kk])
+                                aa<-ifelse(sur_y[i] > a[kk+1],0,1)
+                                delta<-sur_sigema[i]
+                                N[i,kk]<-h0*aa*delta
+                              }
+                            }
+                            s0
+                            lamstar
+                            beta1<-rep(0,K)
+                            lam1<-rep(0,K)
+                            f1<-rep(0,K)
+                            e1<-rep(0,K)
+                            sigma_beta<-c()
+                            
+                            # (1) Define the model as a string
+                            model_string <- textConnection("
+  model{
+# Likelihood Construction
+for(i in 1:row){
+for(kk in 1:K){
+N[i,kk]~ dpois(exp(beta1[kk]*(sur_X[i]))*H[i,kk]*lam1[kk])
+}}
+
+  # Prior for lambdas
+lamm <- 10000*(0.01) # exp(-a[2]*0.01) = 0.995
+lam1[1] ~ dgamma(lamm,10000)# Select value or set prior for lamstar
+w<-0.01
+for(kk in 2:K){ # prior on baseline hazard bits
+f1[kk] <- w*(a[kk+1]-a[kk])
+e1[kk] <- lamstar*f1[kk]
+lam1[kk]~dgamma(e1[kk],f1[kk])
+}
+
+
+# Inferences for the HRs and prior on the betas
+# relative hazard
+  v1 <- 1000
+  # 1. β₁ ~ N(0, v₁²)
+  beta1[1] ~ dnorm(0, 1/(v1*v1))#sd[1]
+
+  # 2.# σ_β² ：half-Cauchy(0, s0)
+ sigma_beta ~ dt(0, 1/pow(s0, 2), 1) T(0,) 
+sigma_beta_sq <- pow(sigma_beta, 2)    
+  
+  # 2. j=2,...,K: (β_j - β_{j-1}) ~ N(0, σ_β²)
+  for(kk in 2:K) {
+    beta1[kk] ~ dnorm(beta1[kk-1], 1/(sigma_beta_sq))
+  }
+  
+}")
+                            
+                            #(2)load the data,specify initial values and compile the mcmc code
+                            data_list <- list(row=row,sur_X=sur_X,N=N,H=H,K=K,a=a,s0=s0,lamstar=lamstar)
+                            beta_init <- numeric(K)
+                            beta_init <- rnorm(K, 0, 0.01) 
+                            sigma_beta_init <- 1.0  
+                            lam1_init <- rep(0.1, K)
+                            
+                            inits <- list(
+                              beta1 = beta_init,
+                              lam1       = lam1_init,
+                              sigma_beta = sigma_beta_init
+                            )
+                            
+                            n.chains <- 2
+                            n.adapt  <- 5000     
+                            n.iter   <- 10000     
+                            thin     <- 1
+                            
+                            model <- jags.model(model_string,data = data_list, inits=inits, n.chains=n.chains,n.adapt=n.adapt)
+                            #(3)generate 5000 post-burn-in samples
+                            params <- c("beta1","lam1")#,"lam","S.pos","S.neg","S.diff")
+                            sample <- coda.samples(model,variable.names=params,n.iter=n.iter, thin=thin,progress.bar="none")#thinning=1，iterations=10000
+                            # (4) Summarize the output
+                            sum<-summary(sample)
+                            outcome<-as.data.frame(cbind(
+                              mean=sum[["statistics"]][,1],
+                              lwr=sum[["quantiles"]][,1],
+                              upr=sum[["quantiles"]][,5]
+                            ))
+                            
+                            sample_combined <- as.mcmc(do.call(rbind, sample))
+                            beta_samples <- as.matrix(sample_combined)[, paste0("beta1[", 1:K, "]"), drop = FALSE]
+                            total_ess <- effectiveSize(sample_combined)
+                            
+                            gelman_diag <- gelman.diag(sample, autoburnin = FALSE)
+                            rhat_values <- gelman_diag$psrf[, "Point est."]
+                            
+                            outcome_all<-cbind(outcome,rhat_values,total_ess)
+                            return(list(outcome_all = outcome_all,
+                                        beta_samples = beta_samples))
+                          }
+    })  # system.time
+    
+    beta_post_results <- beta_post0
+    beta_post0 <- do.call(cbind, lapply(beta_post_results, function(x) x$outcome_all))
+    assign("bcmc_posterior", lapply(beta_post_results, function(x) x$beta_samples), envir = .GlobalEnv)
+    
+    #cat("K =", K, ", 样本量 (n) =", 1000,", m =", M, "，并行代码总运行时间：", time_parallel["elapsed"], "秒\n")
+    beta_post_all<-cbind(beta_post0,as.numeric(time_parallel["elapsed"]))
+    stopCluster(cl)
+    return(beta_post_all)
+  }
+#7. weibull/linear/smooth spline fit and 95%ci
+  smooth_bcmc_curve <- function(y, model, m, knote = NULL){
+    K_now <- length(y)
+    if (model == "linear") {
+      dat_fit<-as.data.frame(cbind(y,1:K_now))
+      colnames(dat_fit)<-c("y","x")
+      fit<-lm(y~x,data=dat_fit)
+      return(as.numeric(fitted(fit)))
+    }
+    if (model == "spline") {
+      library(splines)
+      dat_fit<-as.data.frame(cbind(y,1:K_now))
+      colnames(dat_fit)<-c("y","x")
+      fit<-lm(y~bs(x, df = knote),data=dat_fit)
+      return(as.numeric(fitted(fit)))
+    }
+    if (model == "weibull") {
+      library(MASS)
+      base<-1
+      y2<-y
+      if ((m==1)|(m==3)|(m==4)) {y2[which(y2>base)]<-base}
+      if (m==2) {y2[which(y2<base)]<-base}
+      inter <- 1
+      y_adj <- y2 - base
+      redu <- sum(y_adj) * inter
+      if (redu == 0 || !is.finite(redu)) {
+        X <- sample(c(1:K_now), 10000, replace = TRUE)
+      } else {
+        y_norm <- y_adj / redu
+        if (any(!is.finite(y_norm)) || sum(abs(y_norm)) == 0) {
+          X <- sample(c(1:K_now), 10000, replace = TRUE)
+        } else {
+          prob_vec <- abs(y_norm)
+          prob_vec <- prob_vec / sum(prob_vec)
+          X <- sample(c(1:K_now), 10000, prob = prob_vec, replace = TRUE)
+        }
+      }
+      if (length(unique(X)) < 2) {
+        shape0 <- 1
+        scale0 <- mean(X)
+      } else {
+        fit <- tryCatch(
+          fitdistr(X, "weibull"),
+          error = function(e) {
+            list(estimate = c(shape = 1, scale = mean(X)))
+          }
+        )
+        shape0 <- fit$estimate[1]
+        scale0 <- fit$estimate[2]
+      }
+      x_new<-c(1:K_now)
+      weibull_density <- dweibull(x_new, shape = shape0, scale = scale0+10)
+      return(weibull_density * redu + base)
+    }
+  }
+
+  smooth_bcmc_posterior <- function(mean_hr, posterior_hr, model, m, knote = NULL){
+    fitted_mean <- smooth_bcmc_curve(mean_hr, model, m, knote)
+    fitted_draws <- do.call(rbind, lapply(1:nrow(posterior_hr), function(i) {
+      smooth_bcmc_curve(as.numeric(posterior_hr[i, ]), model, m, knote)
+    }))
+    y_lwr <- apply(fitted_draws, 2, quantile, probs = 0.025, na.rm = TRUE)
+    y_upr <- apply(fitted_draws, 2, quantile, probs = 0.975, na.rm = TRUE)
+    cbind(fitted_mean, y_lwr, y_upr)
+  }
+
+beta_fit_wei<-function(bcmc,M,K,n0){
+  library(MASS)
+  bcmc_wei<-list()
+  bcmc<-as.data.frame(bcmc)
+  for(m in 1:M){
+   col<-(m-1)*3+1
+    mean<-bcmc[,col]
+    if (!exists("bcmc_posterior", envir = .GlobalEnv)) stop("Complete posterior draws are required for BCMC uncertainty intervals.")
+    lines(exp(mean),type="l")
+    lines(exp(bcmc[,col+1]))
+    mean_hr <- exp(mean)
+    posterior_hr <- exp(bcmc_posterior[[m]])
+    bcmc_fit <- smooth_bcmc_posterior(mean_hr, posterior_hr, "weibull", m)
+    lines(bcmc_fit[,1],type="l")
+    lines(bcmc_fit[,2],type="l")
+    lines(bcmc_fit[,3],type="l")
+    bcmc_wei[[m]]<-bcmc_fit
+    colnames(bcmc_wei[[m]])<-c("bcmc","bcmc_lwr","bcmc_upr")
+  }
+  return(bcmc_wei)
+}
+beta_fit_lin<-function(bcmc,M,K,n0){
+  bcmc_lin<-list()
+  bcmc<-as.data.frame(bcmc)
+  for(m in 1:M){
+    plot((1:K0)/K0*K, HR[1,][1:K0], type="l", col="blue", ylim=c(0,3), xlab="Time", ylab="HR", main="Changing HR",bty ="l",lwd=2)
+    lines((1:K0)/K0*K,HR[2,][1:K0],type="l",col="blue",lwd=2)
+    col<-(m-1)*3+1
+    mean<-bcmc[,col]
+    if (!exists("bcmc_posterior", envir = .GlobalEnv)) stop("Complete posterior draws are required for BCMC uncertainty intervals.")
+    lines(exp(mean),type="l")
+    lines(exp(bcmc[,col+1]))
+    mean_hr <- exp(mean)
+    posterior_hr <- exp(bcmc_posterior[[m]])
+    bcmc_fit<-smooth_bcmc_posterior(mean_hr, posterior_hr, "linear", m)
+    lines(bcmc_fit[,1],type="l")
+    lines(bcmc_fit[,2],type="l")
+    lines(bcmc_fit[,3],type="l")
+    bcmc_lin[[m]]<-bcmc_fit
+    colnames(bcmc_lin[[m]])<-c("bcmc","bcmc_lwr","bcmc_upr")
+  }
+  return(bcmc_lin)
+}
+beta_fit_splin<-function(bcmc,M,K,n0,knote){
+  bcmc_splin<-list()
+  bcmc<-as.data.frame(bcmc)
+  for(m in 1:M){
+    plot((1:K0)/K0*K, HR[1,][1:K0], type="l", col="blue", ylim=c(0,3), xlab="Time", ylab="HR", main="Changing HR",bty ="l",lwd=2)
+    lines((1:K0)/K0*K,HR[2,][1:K0],type="l",col="blue",lwd=2)
+    col<-(m-1)*3+1
+    mean<-bcmc[,col]
+    if (!exists("bcmc_posterior", envir = .GlobalEnv)) stop("Complete posterior draws are required for BCMC uncertainty intervals.")
+    lines(exp(mean),type="l")
+    lines(exp(bcmc[,col+1]))
+    mean_hr <- exp(mean)
+    posterior_hr <- exp(bcmc_posterior[[m]])
+    bcmc_fit<-smooth_bcmc_posterior(mean_hr, posterior_hr, "spline", m, knote)
+    lines(bcmc_fit[,1],type="l")
+    lines(bcmc_fit[,2],type="l")
+    lines(bcmc_fit[,3],type="l")
+    bcmc_splin[[m]]<-bcmc_fit
+    colnames(bcmc_splin[[m]])<-c("bcmc","bcmc_lwr","bcmc_upr")
+  }
+  return(bcmc_splin)
+}
+#8. zbic function
+zw_mse <- function(y_true, y_pred, tau = log(1.25)) {
+  w <- exp(- (y_true^2) / (2 * tau^2))
+  mse <- sum(w * (y_true - y_pred)^2,na.rm=T) / sum(w)
+  return(mse)
+}
+zbic<-function(y_true, y_pred, n_parm){
+  n<-length(y_true)
+  zbic_values <- n*log(zw_mse(y_true, y_pred,tau = log(1.25))) + 2 * n_parm
+  return(zbic_values)
+}
+
+#9.95%ci
+t_test_ci_mae <- function(x, y) {
+  d <- abs(x-y)
+  d <- d[!is.na(d)]
+  if (length(d) < 2) {
+    return("(NA,NA)")
+  }
+  
+  if (sd(d) < 1e-10) {
+    val <- sprintf("%.2f", mean(d))
+    return(paste0("(", val, ",", val, ")"))
+  }
+  
+ result <- tryCatch({
+    ci <- t.test(d)$conf.int
+    paste0("(", sprintf("%.2f", ci[1]), ",", sprintf("%.2f", ci[2]), ")")
+  }, error = function(e) {
+    "(NA,NA)"
+  })
+  
+  return(result)
+}
+t_test_ci_mse <- function(x, y) {
+  d <- (x-y)^2
+  d <- d[!is.na(d)]
+  if (length(d) < 2) {
+    return("(NA,NA)")
+  }
+  
+  if (sd(d) < 1e-10) {
+   = val <- sprintf("%.2f", mean(d))
+    return(paste0("(", val, ",", val, ")"))
+  }
+   result <- tryCatch({
+    ci <- t.test(d)$conf.int
+    paste0("(", sprintf("%.2f", ci[1]), ",", sprintf("%.2f", ci[2]), ")")
+  }, error = function(e) {
+    "(NA,NA)"
+  })
+  
+  return(result)
+}
+t_test_ci_bias <- function(x, y) {
+  d <- (x-y)
+  d <- d[!is.na(d)]
+  if (length(d) < 2) {
+    return("(NA,NA)")
+  }
+  
+   if (sd(d) < 1e-10) {
+    val <- sprintf("%.2f", mean(d))
+    return(paste0("(", val, ",", val, ")"))
+  }
+  
+  result <- tryCatch({
+    ci <- t.test(d)$conf.int
+    paste0("(", sprintf("%.2f", ci[1]), ",", sprintf("%.2f", ci[2]), ")")
+  }, error = function(e) {
+    "(NA,NA)"
+  })
+  
+  return(result)
+}
+end.rcode-->
