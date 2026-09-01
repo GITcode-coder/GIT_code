@@ -1,0 +1,132 @@
+<p>1. Set up the parameters of survival function and true value scenarios</p>
+<!--begin.rcode
+#1. Set up the parameters of survival function and true value scenarios
+###1.1 set observation intervals 
+sta<-c("con","var","norm")
+
+sensi<-1
+  K_sen<-c(260,260,200,160,130,100)
+  N_sen<-c(1000,800,800,500,400,200) 
+  n_patients <- N_sen[sensi] # The number of samples
+  K0<-260 #time point
+  K<-K_sen[sensi] 
+  s0<-2.5
+  lamstar<-0.05
+  interval<-1
+  tp<- seq(0,interval*K,interval)
+  #2.set transition roads
+  M<-4
+  s<-c(1:M)
+  
+
+##3.Assume the baseline survival function parameters: lamda, alpha for the transition  
+#(lamda,alpha not change)
+params <- list(
+  c("PFS", "PD", 1.2, 0.001,1), # PFS -> PD
+  c("PD", "PFS", 0.9, 0.01,2),# PD -> PFS
+  c("PFS", "Death", 1, 0.0002,3),  # PFS -> Death      
+  c("PD", "Death", 1, 0.002,4)    # PD -> Death
+)
+beta_sta<-list()
+#3.Three senarios of beta
+beta<- matrix(0, nrow=M, ncol=K0)
+#1. Constant
+for(t in 1:K0){
+  beta[1,t]<-(-log(2))
+  beta[2,t]<-log(2)
+  beta[3,t]<-(-log(2))
+  beta[4,t]<-(-log(2))
+}
+beta_sta[[1]]<-beta
+#2. Monotonic
+beta<- matrix(0, nrow=M, ncol=K0)
+for(t in 1:K0){
+  beta[1,t]<-(-3.5)+log(t/20+15)#
+  beta[2,t]<-4-log(t/10+25)
+  beta[3,t]<-(-3.5)+log(t/20+15)
+  beta[4,t]<-(-3.5)+log(t/20+15)
+}
+beta_sta[[2]]<-beta
+#3.U-shaped 
+beta<- matrix(0, nrow=M, ncol=K0)
+  for(t in 1:K0){
+  si<-60
+  mu<-K0/2
+  beta[1,t]<-(-1)*40*si^(-1)*exp((-(t-mu)^2)/(2*si^2))#
+  beta[2,t]<-45*si^(-1)*exp((-(t-mu)^2)/(2*si^2))
+  beta[3,t]<-(-1)*40*si^(-1)*exp((-(t-mu)^2)/(2*si^2))#
+  beta[4,t]<-(-1)*40*si^(-1)*exp((-(t-mu)^2)/(2*si^2))#
+  }
+beta_sta[[3]]<-beta
+
+beta<-beta_sta[[stasi]]
+  #beta_ture
+  HR<- matrix(0, nrow=M, ncol=K0)
+  HR<-exp(beta)
+  beta_true<-beta
+  write.csv(beta_true,paste0("~/Desktop/BCMC_result/",sta[stasi],"/beta_true.csv"))
+  plot(1:K0, HR[1,][1:K0], type="l", col="green2", ylim=c(0,3), xlab="Time", ylab="HR", main="Dynamic HR (True value)",bty ="l",lwd=2)
+  lines(1:K0, HR[2,][1:K0], type="l", col="orange",lwd=2)
+end.rcode-->
+
+
+<p>2. Data-generating mechanism<p>
+<!--begin.rcode
+#2. Data-generating mechanism
+n_patients # The number of samples
+K0
+q <- 1
+#set.seed(123)
+
+###2.1 Set up Covariate1 (binary 0/1, constant)
+x_list <- list()
+x_list[[1]] <- matrix(1, nrow = n_patients, ncol = K0)
+x_list[[1]][1:(n_patients/2),] <- 0  # 前一半为对照组(X1=0)，后一半为治疗组(X1=1)
+names(x_list) <- c("Covariate1")
+
+###2.2 Set up beta  (q × K)(q=1)
+beta_list <- list()
+beta_list[[1]] <- beta
+names(beta_list) <- c("Covariate1")
+
+###2.3 Simulation
+  tp <- 0:K0
+  tmax <- K0
+  n_sim <- n_patients  
+  discrete_chains <- list()
+  
+  for (i in 1:n_sim) {
+    start_state <- sample(c("PFS", "PD"), 1, prob = c(2/3, 1/3))
+    cont_traj <- sim_one_patient(i, params, tmax,start_state)
+    states <- sur_traj(cont_traj, tp)
+    discrete_chains[[i]] <- data.frame(
+      PatientID = i,
+      Time = tp,
+      State = states
+    )
+  }
+  
+
+###2.4 Convert to wide format
+library(tidyr)
+  wide_data <- do.call(rbind, lapply(discrete_chains, function(df) {
+    df$State_Num <- as.numeric(factor(df$State,
+                                      levels = c("PFS", "PD", "Death"),
+                                      labels = c(1, 2, 3)))
+    df_wide <- as.data.frame(t(df$State_Num))
+    names(df_wide) <- paste0("t_", tp)
+    df_wide
+  }))
+  wide_data<-as.data.frame(wide_data)
+  
+  q<-1
+  obser<-round(c(1:K)/K*K0)
+  wide_data_1<-wide_data[,c(1,obser+1)]
+write.csv(wide_data_1,paste0("~/Desktop/BCMC_result/",sta[stasi],"/wide_data.csv"))#_con,_var,_norm
+
+###2.5 Extracted  survival time data
+C1<-data_sur_extract(wide_data_1,x_list,q)
+colnames(C1)
+data_sur<-C1
+write.csv(data_sur,paste0("~/Desktop/BCMC_result/",sta[stasi],"/data_sur.csv"))#_con,_var,_norm
+end.rcode-->
