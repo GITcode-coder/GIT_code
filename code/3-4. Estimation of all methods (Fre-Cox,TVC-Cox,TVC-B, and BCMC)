@@ -1,0 +1,37 @@
+<p>3. Fre-Cox,TVC-Cox,TVC-B<p>
+<!--begin.rcode
+data_sur<-C1
+M<-4
+HR_cox<-beta_of_HR_cox(data_sur,M)
+HR_TV<-beta_of_HR_TV(data_sur,M,K)
+HR_TV_time<-HR_TV[1,13]
+HR_TV<-HR_TV[,-13]
+HR_rcs<-beta_of_HR_rcs(data_sur,M,K)
+HR_rcs_time<-HR_rcs[1,13]
+HR_rcs<-HR_rcs[,-13]
+
+write.csv(HR_cox,paste0("~/Desktop/BCMC_result/",sta[stasi],"/HR_cox.csv"))
+HR_TV<-beta_of_HR_TV(data_sur,M,K)
+write.csv(HR_TV,paste0("~/Desktop/BCMC_result/",sta[stasi],"/HR_TV.csv"))
+HR_rcs<-beta_of_HR_rcs(data_sur,M,K)
+write.csv(HR_rcs,paste0("~/Desktop/BCMC_result/",sta[stasi],"/HR_rcs.csv"))
+end.rcode-->
+
+<p>4. beta estimation of BCMC<p>
+<!--begin.rcode
+###estimate dynamic hazard ratios (HRs) in a multi-state Markov modeling framework, 
+###which was integrated into a Bayesian regularized Cox survival model.
+beta_post<-beta_of_bcmc(data_sur,M,K,s0,lamstar)
+write.csv(beta_post,paste0("~/Desktop/BCMC_result/",sta[stasi],"/beta_post.csv"))
+
+bcmc<-beta_post[1:K,c(1:3,6:8,11:13,16:18)]#6:8,11:13,16:18
+write.csv(bcmc,paste0("~/Desktop/BCMC_result/",sta[stasi],"/bcmc.csv"))
+  bcmc_time<-beta_post[1,21]
+  bcmc_info<-beta_post[,c(4:5,9:10,14:15,19:20)]
+  write.csv(bcmc_info,paste0("~/Desktop/BCMC_result/",sta[stasi],"/bcmc_info.csv"))    
+  #run_time
+  R_hat<-max(bcmc_info$rhat_values)
+  ESS<-min(bcmc_info$total_ess)
+  run_time<-cbind(HR_TV_time,HR_rcs_time,bcmc_time,R_hat,ESS)
+write.csv(run_time,paste0("~/Desktop/BCMC_result/",sta[stasi],"/run_time.csv"))    
+end.rcode-->
