@@ -1,0 +1,136 @@
+<!--begin.rcode
+#' Compute BIC-based Markov Memory Index (MMI) for a longitudinal state dataset
+#'
+#' @param data A matrix or data.frame with n rows (subjects) and K columns (visits).
+#'        Each entry is a state label (numeric or character).
+#' @param max_order The maximum order to consider (Psi in the paper). Default = 4.
+#' @return A list with components:
+#'         - mmi: the selected order (hat{psi}_BIC)
+#'         - bic_values: named vector of BIC for each psi = 0, ..., max_order-1
+#'         - log_lik: log-likelihood for each psi
+#'         - n_params: number of parameters for each psi
+#'         - total_obs: total number of observations (sum of K_i)
+#'         - n_states: number of distinct states
+#'
+#' @examples
+#' # Simulate a small dataset: 100 subjects, 10 visits, states 1,2,3
+#' set.seed(123)
+#' data <- matrix(sample(1:3, 100*10, replace=TRUE), nrow=100, ncol=10)
+#' result <- compute_mmi(data, max_order=3)
+#' print(result$mmi)
+#' print(result$bic_values)
+#'
+compute_mmi <- function(data, max_order = 4) {
+  # Convert to character if not already to handle state labels uniformly
+  if (!is.character(data)) {
+    data <- as.matrix(data)
+    data[] <- as.character(data)
+  }
+  
+  n <- nrow(data)          # number of subjects
+  K <- ncol(data)          # number of visits (assumed equal for all; if not, pad with NA)
+  states <- sort(unique(as.vector(data)))
+  Z <- length(states)      # number of distinct states
+  total_obs <- sum(!is.na(data))  # total observations (ignore NA if any)
+  
+  # Precompute all transition counts for each psi?
+  # We'll loop over psi and compute counts on the fly.
+  
+  log_lik <- numeric(max_order)   # for psi = 0, ..., max_order-1
+  n_params <- numeric(max_order)
+  bic_values <- numeric(max_order)
+  
+  for (psi in 0:(max_order-1)) {
+    if (psi == 0) {
+      # Zero-order: multinomial likelihood
+      counts <- table(as.vector(data))
+      # Handle possible NA
+      counts <- counts[!is.na(names(counts))]
+      log_lik_val <- sum(counts * log(counts / total_obs))
+      n_param <- Z - 1
+    } else {
+      # psi >= 1: count transitions of order psi
+      # We'll store counts in a list keyed by the sequence of psi previous states
+      trans_counts <- new.env(hash = TRUE)
+      
+      for (i in 1:n) {
+        row <- data[i, ]
+        # remove NA if any (but assume no NA for simplicity)
+        row <- row[!is.na(row)]
+        if (length(row) < psi + 1) next
+        for (k in (psi+1):length(row)) {
+          # sequence of psi previous states and current state
+          prev_seq <- paste(row[(k-psi):(k-1)], collapse = "_")
+          current <- row[k]
+          key <- paste0(prev_seq, "|", current)  # full sequence
+          # Count full sequence
+          if (exists(key, envir = trans_counts)) {
+            trans_counts[[key]] <- trans_counts[[key]] + 1
+          } else {
+            trans_counts[[key]] <- 1
+          }
+        }
+      }
+      
+      # Now compute log-likelihood: sum over all full sequences n_{seq} * log( n_{seq} / n_{prev} )
+      # Need marginal counts for each previous sequence
+      prev_counts <- new.env(hash = TRUE)
+      for (key in ls(trans_counts)) {
+        parts <- strsplit(key, "\\|")[[1]]
+        prev_seq <- parts[1]
+        if (exists(prev_seq, envir = prev_counts)) {
+          prev_counts[[prev_seq]] <- prev_counts[[prev_seq]] + trans_counts[[key]]
+        } else {
+          prev_counts[[prev_seq]] <- trans_counts[[key]]
+        }
+      }
+      
+      log_lik_val <- 0
+      for (key in ls(trans_counts)) {
+        cnt <- trans_counts[[key]]
+        parts <- strsplit(key, "\\|")[[1]]
+        prev_seq <- parts[1]
+        prev_cnt <- prev_counts[[prev_seq]]
+        if (prev_cnt > 0) {
+          p <- cnt / prev_cnt
+          log_lik_val <- log_lik_val + cnt * log(p)
+        }
+      }
+      
+      n_param <- Z^psi * (Z - 1)
+    }
+    
+    log_lik[psi+1] <- log_lik_val
+    n_params[psi+1] <- n_param
+    # BIC = -2*logLik + n_param * log(total_obs)
+    bic_values[psi+1] <- -2 * log_lik_val + n_param * log(total_obs)
+  }
+  
+  names(log_lik) <- paste0("order_", 0:(max_order-1))
+  names(n_params) <- paste0("order_", 0:(max_order-1))
+  names(bic_values) <- paste0("order_", 0:(max_order-1))
+  
+  mmi <- which.min(bic_values) - 1  # 0-based index
+  
+  return(list(
+    mmi = mmi,
+    bic_values = bic_values,
+    log_likelihood = log_lik,
+    n_params = n_params,
+    total_obs = total_obs,
+    n_states = Z,
+    max_order = max_order
+  ))
+}
+hrs_dat_original <- read_csv("Desktop/BCMC_reslut/hrs/hrs_dat_original.csv")[,-1]
+df<-hrs_dat_original[13:23]
+result <- compute_mmi(df, max_order=3)
+cat("Markov Memory Index (MMI) =", result$mmi, "\n")
+
+
+# Example usage:
+# Suppose you have data in a data frame 'df' with n rows (subjects) and columns V1...VK.
+# result <- compute_mmi(df, max_order=3)
+# cat("Markov Memory Index (MMI) =", result$mmi, "\n")
+# print(result$bic_values)
+end.rcode-->
